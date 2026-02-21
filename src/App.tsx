@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Calendar, User, MapPin, Plus, Trash2, LogOut, Zap, Loader2, 
-  Settings, Phone, HeartPulse, Wallet, X, Home, Map, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp
+  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, 
+  Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -296,8 +296,8 @@ export default function App() {
     const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc")));
     const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass));
     const now = new Date();
-    setClasses(all.filter(c => c.endAt > now));
-    setPastClasses(all.filter(c => c.endAt <= now).reverse()); 
+    setClasses(all.filter(c => c.endAt && c.endAt > now));
+    setPastClasses(all.filter(c => c.endAt && c.endAt <= now).reverse()); 
   };
 
   useEffect(() => {
@@ -321,9 +321,7 @@ export default function App() {
 
   // D. LOGIQUE RÉSERVATION / ANNULATION
 
-  // --- VOICI LA FONCTION QUI MANQUAIT ! ---
   const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
-  // ----------------------------------------
 
   const confirmBooking = async (method: PaymentMethod) => {
     const classId = paymentModal.classId;
@@ -334,22 +332,29 @@ export default function App() {
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classId);
         const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
-        const currentAttendees = classDoc.data().attendeeIds || [];
+        const classDoc = await t.get(classRef); 
+        const userDoc = await t.get(userRef);
+        
+        const classData = classDoc.data();
+        const userData = userDoc.data();
+
+        if (!classData || !userData) throw "Données introuvables";
+
+        const currentAttendees = classData.attendeeIds || [];
         
         if (currentAttendees.includes(userProfile.id)) throw "Déjà inscrit !";
-        if (classDoc.data().attendeesCount >= classDoc.data().maxCapacity) throw "Complet !";
-        if (method === 'CREDIT' && userDoc.data().credits < 1) throw "Crédit insuffisant";
+        if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
+        if (method === 'CREDIT' && userData.credits < 1) throw "Crédit insuffisant";
 
-        if (method === 'CREDIT') t.update(userRef, { credits: userDoc.data().credits - 1 });
-        t.update(classRef, { attendeesCount: classDoc.data().attendeesCount + 1, attendeeIds: [...currentAttendees, userProfile.id] });
+        if (method === 'CREDIT') t.update(userRef, { credits: userData.credits - 1 });
+        t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...currentAttendees, userProfile.id] });
         
         t.set(doc(collection(db, "bookings")), { 
           classId, userId: userProfile.id, userName: userProfile.displayName,
-          classTitle: classDoc.data().title, date: classDoc.data().startAt.toDate().toISOString(),
+          classTitle: classData.title, date: classData.startAt.toDate().toISOString(),
           paymentMethod: method, paymentStatus: method === 'CREDIT' ? 'PAID' : 'PENDING'
         });
-        return { title: classDoc.data().title, dateStr: classDoc.data().startAt.toDate().toLocaleDateString('fr-FR'), timeStr: classDoc.data().startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), loc: classDoc.data().location, cap: classDoc.data().maxCapacity };
+        return { title: classData.title, dateStr: classData.startAt.toDate().toLocaleDateString('fr-FR'), timeStr: classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), loc: classData.location, cap: classData.maxCapacity };
       }).then((d) => {
         syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${method})` });
         alert("Réservé ! 🎉"); fetchAllData();
@@ -368,12 +373,20 @@ export default function App() {
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; }
 
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
-        const currentAttendees = classDoc.data().attendeeIds || [];
+        const classRef = doc(db, "classes", classId); 
+        const userRef = doc(db, "users", userProfile.id);
+        const classDoc = await t.get(classRef); 
+        const userDoc = await t.get(userRef);
         
-        if (method === 'CREDIT') t.update(userRef, { credits: userDoc.data().credits + 1 });
-        t.update(classRef, { attendeesCount: classDoc.data().attendeesCount - 1, attendeeIds: currentAttendees.filter((id: string) => id !== userProfile.id) });
+        const classData = classDoc.data();
+        const userData = userDoc.data();
+
+        if (!classData || !userData) throw "Données introuvables";
+
+        const currentAttendees = classData.attendeeIds || [];
+        
+        if (method === 'CREDIT') t.update(userRef, { credits: userData.credits + 1 });
+        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: currentAttendees.filter((id: string) => id !== userProfile.id) });
         if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
 
@@ -406,9 +419,9 @@ export default function App() {
         
         <header className="flex justify-between items-center mb-6 py-4 border-b border-gray-200">
           <div className="flex items-center gap-3">
-             {authUser.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-purple-200 shadow-sm"/>}
+             {authUser?.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-purple-200 shadow-sm"/>}
              <div>
-               <h1 className="text-lg font-bold text-gray-900 leading-tight">Bonjour {authUser.displayName?.split(' ')[0]}</h1>
+               <h1 className="text-lg font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
                <div className="flex gap-3 text-sm text-gray-500 mt-1">
                  <button onClick={() => setShowProfile(true)} className="hover:text-purple-600 font-medium">Mon Profil</button>
                  <span>•</span>
@@ -433,10 +446,10 @@ export default function App() {
             <>
               <div className="w-px bg-gray-200 my-2 mx-2"></div>
               <button onClick={() => setActiveTab('admin_students')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_students' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-                <Users size={18}/> Tous les Élèves (Admin)
+                <Users size={18}/> Tous les Élèves
               </button>
               <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_past' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-                <Archive size={18}/> Cours Passés (Admin)
+                <Archive size={18}/> Cours Passés
               </button>
             </>
           )}
@@ -543,7 +556,7 @@ const AdminStudentsTab = () => {
 
       <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-6 w-full md:w-2/3 min-h-[50vh]">
         {!selectedUserId ? (
-          <div className="h-full flex items-center justify-center text-gray-400">Sélectionnez un élève à gauche pour voir son historique.</div>
+          <div className="h-full flex items-center justify-center text-gray-400">Sélectionnez un élève à gauche.</div>
         ) : (
           <>
             <h3 className="font-bold text-xl text-gray-800 mb-6 flex items-center gap-2">Historique des réservations</h3>
