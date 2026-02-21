@@ -1,5 +1,5 @@
 // src/lib/mock-data.ts
-import { DanceClass } from '../types';
+import type { DanceClass } from '../types';
 
 export const MOCK_CLASSES: DanceClass[] = [
   {

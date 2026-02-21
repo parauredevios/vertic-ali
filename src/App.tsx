@@ -53,9 +53,9 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-purple-600"/> Paiement</h3>
+        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3>
         <div className="space-y-3">
-          <button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-purple-100 bg-purple-50 text-purple-900' : 'bg-gray-50 text-gray-400'}`}>
+          <button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-400'}`}>
             <div className="flex items-center gap-3"><Zap size={20}/> <span className="font-bold">1 Crédit</span></div>
             <span className="text-xs">Solde: {userCredits}</span>
           </button>
@@ -88,7 +88,7 @@ const UserProfileForm = ({ user, onClose }: any) => {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl h-[85vh] overflow-y-auto">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2"><User className="text-purple-600"/> Mon Profil</h2>
+        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2"><User className="text-amber-600"/> Mon Profil</h2>
         <form onSubmit={handleSave} className="space-y-4">
           <div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500"><p><strong>{user.displayName}</strong></p><p>{user.email}</p></div>
           <div className="space-y-3">
@@ -106,7 +106,7 @@ const UserProfileForm = ({ user, onClose }: any) => {
             <input placeholder="Nom contact urgence" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl" />
             <input placeholder="Tél contact urgence" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl" />
           </div>
-          <button type="submit" disabled={saving} className="w-full py-3 mt-6 bg-purple-600 text-white font-bold rounded-xl shadow-lg">{saving ? '...' : 'Enregistrer'}</button>
+          <button type="submit" disabled={saving} className="w-full py-3 mt-6 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-xl shadow-lg hover:from-amber-600 hover:to-amber-700">{saving ? '...' : 'Enregistrer'}</button>
           <button type="button" onClick={onClose} className="w-full py-3 text-gray-500 font-bold">Annuler</button>
         </form>
       </div>
@@ -166,7 +166,7 @@ const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, u
   const isProcessing = processingId === info.id;
 
   return (
-    <div className={`bg-white p-5 rounded-2xl shadow-sm border mb-0 relative flex flex-col justify-between ${isBooked ? 'border-purple-300 ring-2 ring-purple-50' : 'border-gray-100'}`}>
+    <div className={`bg-white p-5 rounded-2xl shadow-sm border mb-0 relative flex flex-col justify-between ${isBooked ? 'border-amber-300 ring-2 ring-amber-50' : 'border-gray-100'}`}>
       {userRole === 'admin' && <button onClick={() => { if(confirm("Supprimer ce cours ?")) onDelete(info.id); }} className="absolute top-3 right-3 text-gray-300 hover:text-red-500"><Trash2 size={18}/></button>}
       
       <div>
@@ -175,7 +175,7 @@ const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, u
             <h3 className="font-bold text-lg text-gray-800 leading-tight mb-1">{info.title}</h3>
             <p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p>
           </div>
-          <span className="text-xl font-black text-purple-600 bg-purple-50 px-2 py-1 rounded-lg shrink-0">{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</span>
+          <span className="text-xl font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg shrink-0">{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</span>
         </div>
         
         <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block">Prof : {info.instructor}</span>
@@ -192,14 +192,14 @@ const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, u
           {isProcessing ? '...' : 'Annuler ma réservation'}
         </button>
       ) : (
-        <button onClick={() => onBookClick(info.id)} disabled={isFull || isProcessing || info.endAt < new Date()} className={`w-full py-3 rounded-xl font-bold text-white transition-all ${isFull || info.endAt < new Date() ? 'bg-gray-300 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-200'}`}>
+        <button onClick={() => onBookClick(info.id)} disabled={isFull || isProcessing || info.endAt < new Date()} className={`w-full py-3 rounded-xl font-bold text-white transition-all ${isFull || info.endAt < new Date() ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-200'}`}>
           {isProcessing ? '...' : info.endAt < new Date() ? 'Terminé' : isFull ? 'Cours Complet' : 'Réserver ma place'}
         </button>
       )}
 
       {userRole === 'admin' && (
         <div className="mt-4">
-          <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-bold text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors">
+          <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-bold text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors">
             <Users size={16}/> {showAttendees ? 'Masquer les inscrits' : 'Voir les inscrits'} {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
           </button>
           {showAttendees && <AdminClassAttendees classId={info.id} />}
@@ -228,11 +228,11 @@ const AdminClassForm = ({ onAdd, locations }: { onAdd: () => void, locations: st
     } catch (e) { alert("Erreur"); }
   };
   
-  if (!isOpen) return <button onClick={() => setIsOpen(true)} className="w-full mb-6 border-2 border-dashed border-purple-300 text-purple-600 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-purple-50"><Plus/> Créer un nouveau cours</button>;
-  
+  if (!isOpen) return <button onClick={() => setIsOpen(true)} className="w-full mb-6 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50"><Plus/> Créer un nouveau cours</button>;
+
   return (
-    <div className="bg-white p-5 rounded-xl mb-6 border border-purple-100">
-      <h3 className="font-bold text-purple-800 mb-4">Nouveau Cours</h3>
+    <div className="bg-white p-5 rounded-xl mb-6 border border-amber-100">
+      <h3 className="font-bold text-amber-800 mb-4">Nouveau Cours</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-2 border rounded" placeholder="Titre du cours"/>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -248,7 +248,7 @@ const AdminClassForm = ({ onAdd, locations }: { onAdd: () => void, locations: st
           </div>
         </div>
         <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-2 border rounded" placeholder="Description (Tenue, Niveau...)"/>
-        <div className="flex gap-2"><button type="button" onClick={()=>setIsOpen(false)} className="flex-1 py-2 bg-gray-100 rounded">Annuler</button><button type="submit" className="flex-1 py-2 bg-purple-600 text-white rounded font-bold">Valider</button></div>
+        <div className="flex gap-2"><button type="button" onClick={()=>setIsOpen(false)} className="flex-1 py-2 bg-gray-100 rounded">Annuler</button><button type="submit" className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded font-bold">Valider</button></div>
       </form>
     </div>
   );
@@ -397,12 +397,12 @@ export default function App() {
   };
 
   // --- RENDU UI ---
-  if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-purple-600"/></div>;
+  if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-800 to-purple-500 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center p-4">
       <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center">
         <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block">
-            <img src="/logo.png" alt="Logo Vertic'Ali" className="w-40 h-40 object-contain mx-auto" onError={(e) => { e.currentTarget.src = "https://ui-avatars.com/api/?name=Vertic+Ali&background=9333ea&color=fff&size=128" }}/>
+            <img src="/logo.png" alt="Logo Vertic'Ali" className="w-40 h-40 object-contain mx-auto" onError={(e) => { e.currentTarget.src = "https://ui-avatars.com/api/?name=Vertic+Ali&background=d4af37&color=000&size=128" }}/>
         </div>
         <h1 className="text-2xl font-bold text-gray-800 mb-2">Vertic'Ali</h1>
         <p className="text-gray-500 mb-8">Réserve tes cours en un clic.</p>
@@ -419,26 +419,26 @@ export default function App() {
         
         <header className="flex justify-between items-center mb-6 py-4 border-b border-gray-200">
           <div className="flex items-center gap-3">
-             {authUser?.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-purple-200 shadow-sm"/>}
+             {authUser?.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-amber-200 shadow-sm"/>}
              <div>
                <h1 className="text-lg font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
                <div className="flex gap-3 text-sm text-gray-500 mt-1">
-                 <button onClick={() => setShowProfile(true)} className="hover:text-purple-600 font-medium">Mon Profil</button>
+                 <button onClick={() => setShowProfile(true)} className="hover:text-amber-600 font-medium">Mon Profil</button>
                  <span>•</span>
                  <button onClick={() => signOut(auth)} className="hover:text-red-500">Déconnexion</button>
                </div>
              </div>
           </div>
-          <div className="px-4 py-2 bg-white border border-purple-100 rounded-xl shadow-sm text-lg font-bold text-purple-700 flex items-center gap-2">
-            <Zap size={18} className="fill-purple-600" /> {userProfile?.credits ?? 0}
+          <div className="px-4 py-2 bg-white border border-amber-100 rounded-xl shadow-sm text-lg font-bold text-amber-700 flex items-center gap-2">
+            <Zap size={18} className="fill-amber-600" /> {userProfile?.credits ?? 0}
           </div>
         </header>
 
         <nav className="flex overflow-x-auto hide-scrollbar gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-gray-100">
-          <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'planning' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-50'}`}>
+          <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}>
             <Calendar size={18}/> Planning
           </button>
-          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-50'}`}>
+          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}>
             <History size={18}/> Mon Historique
           </button>
           
@@ -468,7 +468,7 @@ export default function App() {
 
         {activeTab === 'history' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl">
-            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-purple-600"/> Mon Historique</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-amber-600"/> Mon Historique</h2>
             {myBookings.length === 0 ? <p className="text-gray-500">Aucun cours réservé pour le moment.</p> : (
               <div className="space-y-4">
                 {myBookings.map(b => (
@@ -546,8 +546,8 @@ const AdminStudentsTab = () => {
               <span className="text-xs text-gray-500 mb-2">{u.email}</span>
               <div className="flex gap-2 items-center">
                 <button onClick={(e) => { e.stopPropagation(); handleUpdateCredit(u.id, u.credits-1)}} className="w-6 h-6 bg-gray-200 rounded text-xs font-bold">-</button>
-                <span className="text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">{u.credits} cr</span>
-                <button onClick={(e) => { e.stopPropagation(); handleUpdateCredit(u.id, u.credits+1)}} className="w-6 h-6 bg-purple-200 text-purple-800 rounded text-xs font-bold">+</button>
+                <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{u.credits} cr</span>
+                <button onClick={(e) => { e.stopPropagation(); handleUpdateCredit(u.id, u.credits+1)}} className="w-6 h-6 bg-amber-200 text-amber-800 rounded text-xs font-bold">+</button>
               </div>
             </div>
           ))}
