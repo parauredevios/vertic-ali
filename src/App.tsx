@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
-  Settings, Phone, HeartPulse, Wallet, X, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
+  Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
@@ -42,9 +42,13 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 const syncToSheet = async (payload: any) => {
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return; 
   try {
+    const enrichedPayload = {
+      ...payload,
+      sheetName: payload.type === 'BOOKING' ? (payload.paymentStatus === 'PAID' ? 'Payer' : 'NON PAYÉ') : 'Defaut'
+    };
     await fetch(GOOGLE_SCRIPT_URL, {
       method: "POST", mode: "no-cors", 
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(enrichedPayload)
     });
   } catch (e) { console.error("Erreur Sync Sheets", e); }
 };
@@ -56,7 +60,7 @@ const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset()
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
         <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
@@ -87,7 +91,7 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
 const BookingSuccessModal = ({ isOpen, onClose }: any) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
         <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
@@ -118,7 +122,7 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
 const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3>
         <div className="space-y-3">
@@ -153,7 +157,7 @@ const UserProfileForm = ({ user, onClose }: any) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl h-[85vh] overflow-y-auto">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2"><User className="text-amber-600"/> Mon Profil</h2>
         <form onSubmit={handleSave} className="space-y-4">
@@ -221,7 +225,7 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
     <div className="mt-4 border-t border-gray-100 pt-4 space-y-2">
       <h4 className="text-sm font-bold text-gray-800 mb-2">Élèves inscrits :</h4>
       {bookings.map(b => (
-        <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm">
+        <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left">
           <div>
             <span className="font-bold text-gray-700 block">{b.userName}</span>
             <span className="text-xs text-gray-500">{b.paymentMethod}</span>
@@ -229,7 +233,7 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
           <button 
             onClick={() => togglePayment(b.id, b.paymentStatus, b)}
             disabled={b.paymentMethod === 'CREDIT'} 
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors ${
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors shrink-0 ${
               b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
             }`}
           >
@@ -248,7 +252,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   const canBook = userProfile?.hasFilledForm;
 
   return (
-    <div className={`bg-white p-5 rounded-2xl shadow-sm border relative flex flex-col justify-between ${isBooked ? 'border-amber-300 ring-2 ring-amber-50' : 'border-gray-100 hover:shadow-md transition-shadow'}`}>
+    <div className={`bg-white p-5 rounded-2xl shadow-sm border relative flex flex-col justify-between text-left ${isBooked ? 'border-amber-400 ring-4 ring-amber-50' : 'border-gray-100 hover:shadow-md transition-shadow'}`}>
       
       {/* Menu d'édition Admin */}
       {userProfile?.role === 'admin' && (
@@ -259,32 +263,34 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
       )}
       
       <div>
-        <div className="flex justify-between items-start mb-3">
-          <div className="pr-16">
-            <h3 className="font-bold text-lg text-gray-800 leading-tight mb-1">{info.title}</h3>
+        <div className="flex justify-between items-start mb-4 gap-3">
+          <div className="flex-1 min-w-0 pr-6">
+            <h3 className="font-bold text-xl text-gray-800 leading-tight mb-1 truncate">{info.title}</h3>
             <p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p>
           </div>
-          <span className="text-xl font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg shrink-0">{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</span>
+          <div className="text-xl font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl shrink-0 whitespace-nowrap text-center">
+            {info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}
+          </div>
         </div>
         
         <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block">Prof : {info.instructor}</span>
         {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">{info.description}</p>}
         
-        <div className="flex gap-4 text-sm text-gray-500 mb-6 font-medium">
+        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
           <span className="flex gap-1.5 items-center"><MapPin size={16}/> {info.location}</span>
         </div>
       </div>
 
       {isBooked ? (
-        <button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">
+        <button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-colors">
           {isProcessing ? '...' : 'Annuler ma réservation'}
         </button>
       ) : (
         <button 
           onClick={() => onBookClick(info.id)} 
           disabled={!canBook || isFull || isProcessing || info.endAt < new Date()} 
-          className={`w-full py-3 rounded-xl font-bold text-white transition-all 
+          className={`w-full py-3.5 rounded-xl font-bold text-white transition-all 
             ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-200'}
           `}
         >
@@ -294,7 +300,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
 
       {userProfile?.role === 'admin' && (
         <div className="mt-4">
-          <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-bold text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors">
+          <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 rounded-xl hover:bg-amber-100 transition-colors">
             <Users size={16}/> {showAttendees ? 'Masquer les inscrits' : 'Voir les inscrits'} {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
           </button>
           {showAttendees && <AdminClassAttendees classId={info.id} />}
@@ -304,7 +310,6 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   );
 };
 
-// Formulaire Édition/Création Cours Admin
 const AdminClassForm = ({ onAdd, locations, editClassData, onCancelEdit }: { onAdd: () => void, locations: string[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [data, setData] = useState({title: 'Pole Débutant', date: '', desc: '', cap: 12, loc: locations[0] || 'Studio A'});
@@ -337,25 +342,25 @@ const AdminClassForm = ({ onAdd, locations, editClassData, onCancelEdit }: { onA
   
   const handleClose = () => { setIsOpen(false); onCancelEdit(); };
 
-  if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-6 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50"><Plus/> Créer un nouveau cours</button>;
+  if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-8 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50 transition-colors"><Plus/> Créer un nouveau cours</button>;
 
   return (
-    <div className="bg-white p-5 rounded-xl mb-6 border border-amber-100 shadow-sm relative">
-      <h3 className="font-bold text-amber-800 mb-4">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
+    <div className="bg-white p-6 rounded-2xl mb-8 border border-amber-100 shadow-sm relative text-left">
+      <h3 className="font-bold text-amber-800 mb-4 text-lg">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-2 border rounded" placeholder="Titre du cours"/>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-2 border rounded col-span-1 md:col-span-1"/>
-          <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-2 border rounded bg-white">
+        <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Titre du cours"/>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border rounded-xl col-span-1 md:col-span-1"/>
+          <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border rounded-xl bg-white">
             {locations.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
-          <div className="flex items-center gap-2 bg-gray-50 px-2 rounded border">
-            <span className="text-xs text-gray-500 whitespace-nowrap">Places:</span>
-            <input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full bg-transparent p-2 outline-none"/>
+          <div className="flex items-center gap-2 bg-gray-50 px-3 rounded-xl border">
+            <span className="text-sm text-gray-500 whitespace-nowrap font-medium">Places:</span>
+            <input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full bg-transparent p-3 outline-none"/>
           </div>
         </div>
-        <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-2 border rounded" placeholder="Description (Tenue, Niveau...)"/>
-        <div className="flex gap-2"><button type="button" onClick={handleClose} className="flex-1 py-2 bg-gray-100 rounded text-gray-600 font-bold">Annuler</button><button type="submit" className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded font-bold">{editClassData ? 'Mettre à jour' : 'Valider'}</button></div>
+        <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Description (Tenue, Niveau...)"/>
+        <div className="flex gap-3 pt-2"><button type="button" onClick={handleClose} className="flex-1 py-3 bg-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-200">Annuler</button><button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold">{editClassData ? 'Mettre à jour' : 'Valider'}</button></div>
       </form>
     </div>
   );
@@ -383,7 +388,7 @@ export default function App() {
   
   const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
 
-  // Vérifier s'il y a un paiement en attente
+  // Vérifier s'il y a un paiement en attente pour le badge clignotant
   const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING');
 
   useEffect(() => {
@@ -512,7 +517,7 @@ export default function App() {
   // --- RENDU UI ---
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
       <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center">
         <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block">
             <img src="/logo.png" alt="Logo Vertic'Ali" className="w-40 h-40 object-contain mx-auto" onError={(e) => { e.currentTarget.src = "https://ui-avatars.com/api/?name=Vertic+Ali&background=d4af37&color=000&size=128" }}/>
@@ -527,40 +532,43 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans pb-32">
-      <div className="w-full max-w-[1600px] mx-auto">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans pb-32 text-left w-full">
+      <div className="w-full max-w-[1500px] mx-auto">
         
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 py-4 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-             {authUser?.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-amber-200 shadow-sm"/>}
+          <div className="flex items-center gap-4">
+             {authUser?.photoURL && <img src={authUser.photoURL} className="w-14 h-14 rounded-full border-2 border-amber-200 shadow-sm"/>}
              <div>
-               <h1 className="text-lg font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
-               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mt-2">
-                 <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-3 py-1.5 rounded-lg transition-all border ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-200 shadow-[0_0_10px_rgba(239,68,68,0.2)] animate-pulse' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+               <h1 className="text-xl font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
+               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm mt-2">
+                 
+                 <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-4 py-1.5 rounded-lg transition-all border-2 ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
                    Moyens de paiement
                  </button>
+                 
+                 <span className="text-gray-300 hidden sm:inline">•</span>
                  <button onClick={() => setShowProfile(true)} className="text-gray-500 hover:text-amber-600 font-medium">Mon Profil</button>
                  <span className="text-gray-300 hidden sm:inline">•</span>
                  <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
                </div>
              </div>
           </div>
-          <div className="px-4 py-2 bg-white border border-amber-100 rounded-xl shadow-sm text-lg font-bold text-amber-700 flex items-center gap-2 self-start sm:self-auto">
-            <Zap size={18} className="fill-amber-600" /> {userProfile?.credits ?? 0}
+          <div className="px-5 py-3 bg-white border-2 border-amber-100 rounded-2xl shadow-sm text-xl font-black text-amber-700 flex items-center gap-2 self-start sm:self-auto">
+            <Zap size={22} className="fill-amber-600" /> {userProfile?.credits ?? 0}
           </div>
         </header>
 
         {userProfile && !userProfile.hasFilledForm && (
-          <div className="bg-red-50 border-2 border-red-200 p-4 rounded-2xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-            <div className="flex items-center gap-3 text-red-700 font-medium text-sm">
-               <AlertTriangle size={24} className="shrink-0" />
+          <div className="bg-red-50 border-2 border-red-200 p-5 rounded-2xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-4 text-red-700 font-medium text-base">
+               <AlertTriangle size={28} className="shrink-0" />
                <p>Tu dois obligatoirement remplir la <b>fiche d'inscription (santé & droit à l'image)</b> pour pouvoir réserver un cours.</p>
             </div>
-            <div className="flex gap-2 w-full md:w-auto">
-               <a href="https://docs.google.com/forms/d/e/1FAIpQLScFB9AwnG5svoixfNDer61h98heVkQP5bRPGww8x05XcNy9HQ/viewform" target="_blank" rel="noreferrer" className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-colors">
+            <div className="flex gap-3 w-full md:w-auto">
+               <a href="https://docs.google.com/forms/d/e/1FAIpQLScFB9AwnG5svoixfNDer61h98heVkQP5bRPGww8x05XcNy9HQ/viewform" target="_blank" rel="noreferrer" className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-colors">
                   <ExternalLink size={16}/> Ouvrir le formulaire
                </a>
-               <button onClick={handleValidateForm} className="flex-1 md:flex-none px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold transition-colors">
+               <button onClick={handleValidateForm} className="flex-1 md:flex-none px-5 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-green-200">
                   C'est fait !
                </button>
             </div>
@@ -592,7 +600,7 @@ export default function App() {
           <div>
             {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
             {classes.length === 0 ? ( <div className="bg-white rounded-2xl p-10 text-center text-gray-400">Aucun cours à venir.</div> ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">
                 {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} />)}
               </div>
             )}
@@ -600,7 +608,7 @@ export default function App() {
         )}
 
         {activeTab === 'history' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl text-left">
             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-amber-600"/> Mon Historique</h2>
             {myBookings.length === 0 ? <p className="text-gray-500">Aucun cours réservé pour le moment.</p> : (
               <div className="space-y-4">
@@ -631,7 +639,7 @@ export default function App() {
           <div>
             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives des cours terminés</h2>
             {pastClasses.length === 0 ? <p className="text-gray-500">Aucun cours terminé.</p> : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">
                 {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} />)}
               </div>
             )}
@@ -671,7 +679,7 @@ const AdminStudentsTab = () => {
   const handleUpdateCredit = async (userId: string, newAmount: number) => await updateDoc(doc(db, "users", userId), { credits: newAmount });
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 items-start">
+    <div className="flex flex-col lg:flex-row gap-6 items-start text-left">
       <div className="bg-white border-2 border-gray-800 rounded-2xl p-4 w-full lg:w-1/3">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Users size={18}/> Liste des élèves</h3>
         <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
@@ -679,7 +687,12 @@ const AdminStudentsTab = () => {
             <div key={u.id} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => setSelectedUserId(u.id)}>
               <div className="flex justify-between items-center mb-1">
                 <span className="font-bold text-sm text-gray-800">{u.displayName}</span>
-                {!u.hasFilledForm && <AlertTriangle size={14} className="text-red-500" title="Fiche non remplie" />}
+                {/* CORRECTION DU BOUTON ALERT TRIANGLE POUR VERCEL ICI */}
+                {!u.hasFilledForm && (
+                  <span title="Fiche non remplie">
+                    <AlertTriangle size={14} className="text-red-500" />
+                  </span>
+                )}
               </div>
               <span className="text-xs text-gray-500 mb-2">{u.email}</span>
               <div className="flex gap-2 items-center">
