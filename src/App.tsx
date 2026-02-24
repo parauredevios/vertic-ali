@@ -37,11 +37,17 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
-  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return; 
+  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return;
   try {
+    const enrichedPayload = {
+      ...payload,
+      sheetName: payload.type === 'BOOKING'
+        ? (payload.paymentStatus === 'PAID' ? 'Payer' : 'A Regler')
+        : 'Defaut'
+    };
     await fetch(GOOGLE_SCRIPT_URL, {
-      method: "POST", mode: "no-cors", 
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(enrichedPayload)
     });
   } catch (e) { console.error("Erreur Sync Sheets", e); }
 };
@@ -129,8 +135,19 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
     return () => unsub();
   }, [classId]);
 
-  const togglePayment = async (bookingId: string, currentStatus: string) => {
-    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: currentStatus === 'PAID' ? 'PENDING' : 'PAID' });
+  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
+    const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
+    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus });
+    syncToSheet({
+      type: 'BOOKING_UPDATE',
+      classId: bookingData.classId,
+      classTitle: bookingData.classTitle,
+      date: new Date(bookingData.date).toLocaleDateString('fr-FR'),
+      time: new Date(bookingData.date).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
+      studentName: bookingData.userName,
+      paymentStatus: newStatus,
+      paymentMethod: bookingData.paymentMethod
+    });
   };
 
   if (loading) return <div className="p-4 text-center text-gray-400 text-sm">Chargement...</div>;
@@ -145,8 +162,8 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
             <span className="font-bold text-gray-700 block">{b.userName}</span>
             <span className="text-xs text-gray-500">{b.paymentMethod}</span>
           </div>
-          <button 
-            onClick={() => togglePayment(b.id, b.paymentStatus)}
+          <button
+            onClick={() => togglePayment(b.id, b.paymentStatus, b)}
             disabled={b.paymentMethod === 'CREDIT'} 
             className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors ${
               b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
@@ -349,14 +366,15 @@ export default function App() {
         if (method === 'CREDIT') t.update(userRef, { credits: userData.credits - 1 });
         t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...currentAttendees, userProfile.id] });
         
-        t.set(doc(collection(db, "bookings")), { 
+        const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING';
+        t.set(doc(collection(db, "bookings")), {
           classId, userId: userProfile.id, userName: userProfile.displayName,
           classTitle: classData.title, date: classData.startAt.toDate().toISOString(),
-          paymentMethod: method, paymentStatus: method === 'CREDIT' ? 'PAID' : 'PENDING'
+          paymentMethod: method, paymentStatus
         });
-        return { title: classData.title, dateStr: classData.startAt.toDate().toLocaleDateString('fr-FR'), timeStr: classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), loc: classData.location, cap: classData.maxCapacity };
+        return { title: classData.title, dateStr: classData.startAt.toDate().toLocaleDateString('fr-FR'), timeStr: classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), loc: classData.location, cap: classData.maxCapacity, paymentStatus, method };
       }).then((d) => {
-        syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${method})` });
+        syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus });
         alert("Réservé ! 🎉"); fetchAllData();
       });
     } catch (e) { alert("Erreur: " + e); }
