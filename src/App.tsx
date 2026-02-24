@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, 
-  Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp
+  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
+  Settings, Phone, HeartPulse, Wallet, X, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
+  Smartphone, Building, ShoppingBag, XCircle
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -26,33 +27,93 @@ interface DanceClass {
 interface UserProfile {
   id: string; credits: number; email: string; displayName: string; role: 'student' | 'admin';
   street?: string; zipCode?: string; city?: string; phone?: string; emergencyContact?: string; emergencyPhone?: string;
+  hasFilledForm?: boolean; 
 }
 
 interface BookingInfo {
   id: string; classId: string; userId: string; userName: string; classTitle: string;
-  date: string; paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
+  date: string; dateStr: string; timeStr: string; location: string;
+  paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
 }
 
 type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
-  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return;
+  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return; 
   try {
-    const enrichedPayload = {
-      ...payload,
-      sheetName: payload.type === 'BOOKING'
-        ? (payload.paymentStatus === 'PAID' ? 'Payer' : 'A Regler')
-        : 'Defaut'
-    };
     await fetch(GOOGLE_SCRIPT_URL, {
-      method: "POST", mode: "no-cors",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(enrichedPayload)
+      method: "POST", mode: "no-cors", 
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
   } catch (e) { console.error("Erreur Sync Sheets", e); }
 };
 
-// --- 3. MODALES & COMPOSANTS TRANSVERSES ---
+const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+// --- 3. MODALES ---
+
+const PaymentInfoModal = ({ isOpen, onClose }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
+        <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
+
+        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
+          <div>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero (gratuit et instantané) :</span>
+            <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06********</p>
+          </div>
+          <hr className="border-gray-200"/>
+          <div>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
+            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR212***************************</p>
+          </div>
+        </div>
+
+        <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
+        </div>
+
+        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
+      </div>
+    </div>
+  );
+};
+
+const BookingSuccessModal = ({ isOpen, onClose }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
+        <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
+        <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
+
+        <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
+          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
+          <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
+          <ul className="text-sm text-amber-800 space-y-2 mb-5 list-disc pl-5 font-medium">
+            <li>Short court + brassière <span className="font-normal opacity-80">(la peau doit accrocher !)</span></li>
+            <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
+            <li>Gourde d'eau</li>
+          </ul>
+
+          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
+          <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets <b>pas de crème/huile</b> sur le corps le jour même, tu risques de glisser !</li>
+          </ul>
+        </div>
+
+        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris, à vite !</button>
+      </div>
+    </div>
+  );
+};
 
 const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
   if (!isOpen) return null;
@@ -120,7 +181,7 @@ const UserProfileForm = ({ user, onClose }: any) => {
   );
 };
 
-// --- 4. SOUS-COMPOSANTS DES ONGLETS ---
+// --- 4. SOUS-COMPOSANTS ---
 
 const AdminClassAttendees = ({ classId }: { classId: string }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
@@ -138,15 +199,18 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
   const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
     await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus });
+    
+    // Synchro avec Google Sheets : Déplace vers le bon onglet
     syncToSheet({
       type: 'BOOKING_UPDATE',
       classId: bookingData.classId,
       classTitle: bookingData.classTitle,
-      date: new Date(bookingData.date).toLocaleDateString('fr-FR'),
-      time: new Date(bookingData.date).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
-      studentName: bookingData.userName,
-      paymentStatus: newStatus,
-      paymentMethod: bookingData.paymentMethod
+      date: bookingData.dateStr,
+      time: bookingData.timeStr,
+      location: bookingData.location || '',
+      studentId: bookingData.userId,
+      studentName: `${bookingData.userName} (${bookingData.paymentMethod})`,
+      paymentStatus: newStatus
     });
   };
 
@@ -162,7 +226,7 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
             <span className="font-bold text-gray-700 block">{b.userName}</span>
             <span className="text-xs text-gray-500">{b.paymentMethod}</span>
           </div>
-          <button
+          <button 
             onClick={() => togglePayment(b.id, b.paymentStatus, b)}
             disabled={b.paymentMethod === 'CREDIT'} 
             className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors ${
@@ -177,18 +241,26 @@ const AdminClassAttendees = ({ classId }: { classId: string }) => {
   );
 };
 
-const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, userRole, isBooked }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const isFull = info.attendeesCount >= info.maxCapacity;
   const isProcessing = processingId === info.id;
+  const canBook = userProfile?.hasFilledForm;
 
   return (
-    <div className={`bg-white p-5 rounded-2xl shadow-sm border mb-0 relative flex flex-col justify-between ${isBooked ? 'border-amber-300 ring-2 ring-amber-50' : 'border-gray-100'}`}>
-      {userRole === 'admin' && <button onClick={() => { if(confirm("Supprimer ce cours ?")) onDelete(info.id); }} className="absolute top-3 right-3 text-gray-300 hover:text-red-500"><Trash2 size={18}/></button>}
+    <div className={`bg-white p-5 rounded-2xl shadow-sm border relative flex flex-col justify-between ${isBooked ? 'border-amber-300 ring-2 ring-amber-50' : 'border-gray-100 hover:shadow-md transition-shadow'}`}>
+      
+      {/* Menu d'édition Admin */}
+      {userProfile?.role === 'admin' && (
+        <div className="absolute top-3 right-3 flex gap-2">
+           <button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500 transition-colors"><Edit2 size={18}/></button>
+           <button onClick={() => { if(confirm("Supprimer ce cours ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+        </div>
+      )}
       
       <div>
         <div className="flex justify-between items-start mb-3">
-          <div className="pr-6">
+          <div className="pr-16">
             <h3 className="font-bold text-lg text-gray-800 leading-tight mb-1">{info.title}</h3>
             <p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p>
           </div>
@@ -209,12 +281,18 @@ const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, u
           {isProcessing ? '...' : 'Annuler ma réservation'}
         </button>
       ) : (
-        <button onClick={() => onBookClick(info.id)} disabled={isFull || isProcessing || info.endAt < new Date()} className={`w-full py-3 rounded-xl font-bold text-white transition-all ${isFull || info.endAt < new Date() ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-200'}`}>
-          {isProcessing ? '...' : info.endAt < new Date() ? 'Terminé' : isFull ? 'Cours Complet' : 'Réserver ma place'}
+        <button 
+          onClick={() => onBookClick(info.id)} 
+          disabled={!canBook || isFull || isProcessing || info.endAt < new Date()} 
+          className={`w-full py-3 rounded-xl font-bold text-white transition-all 
+            ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300 cursor-not-allowed' : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-200'}
+          `}
+        >
+          {isProcessing ? '...' : info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}
         </button>
       )}
 
-      {userRole === 'admin' && (
+      {userProfile?.role === 'admin' && (
         <div className="mt-4">
           <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-bold text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors">
             <Users size={16}/> {showAttendees ? 'Masquer les inscrits' : 'Voir les inscrits'} {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
@@ -226,46 +304,58 @@ const ClassCard = ({ info, onDelete, onBookClick, onCancelClick, processingId, u
   );
 };
 
-const AdminClassForm = ({ onAdd, locations }: { onAdd: () => void, locations: string[] }) => {
+// Formulaire Édition/Création Cours Admin
+const AdminClassForm = ({ onAdd, locations, editClassData, onCancelEdit }: { onAdd: () => void, locations: string[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [data, setData] = useState({title: 'Pole Débutant', date: '', desc: '', cap: 12, loc: locations[0] || 'Studio A'});
   
-  useEffect(() => { if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0]})) }, [locations]);
+  useEffect(() => {
+    if (editClassData) {
+      setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location });
+      setIsOpen(true);
+    } else {
+      if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0]}));
+    }
+  }, [editClassData, locations]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!data.date) return;
     try {
       const start = new Date(data.date);
-      await addDoc(collection(db, "classes"), {
+      const payload = {
         title: data.title, description: data.desc, instructor: "Ali", location: data.loc,
         startAt: Timestamp.fromDate(start), endAt: Timestamp.fromDate(new Date(start.getTime() + 90*60000)),
-        maxCapacity: Number(data.cap), attendeesCount: 0, attendeeIds: []
-      });
-      setIsOpen(false); onAdd();
+        maxCapacity: Number(data.cap)
+      };
+
+      if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload);
+      else await addDoc(collection(db, "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
+      
+      setIsOpen(false); onCancelEdit(); onAdd();
     } catch (e) { alert("Erreur"); }
   };
   
-  if (!isOpen) return <button onClick={() => setIsOpen(true)} className="w-full mb-6 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50"><Plus/> Créer un nouveau cours</button>;
+  const handleClose = () => { setIsOpen(false); onCancelEdit(); };
+
+  if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-6 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50"><Plus/> Créer un nouveau cours</button>;
 
   return (
-    <div className="bg-white p-5 rounded-xl mb-6 border border-amber-100">
-      <h3 className="font-bold text-amber-800 mb-4">Nouveau Cours</h3>
+    <div className="bg-white p-5 rounded-xl mb-6 border border-amber-100 shadow-sm relative">
+      <h3 className="font-bold text-amber-800 mb-4">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-2 border rounded" placeholder="Titre du cours"/>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-2 border rounded col-span-1 md:col-span-1"/>
-          
           <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-2 border rounded bg-white">
             {locations.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
-          
           <div className="flex items-center gap-2 bg-gray-50 px-2 rounded border">
             <span className="text-xs text-gray-500 whitespace-nowrap">Places:</span>
             <input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full bg-transparent p-2 outline-none"/>
           </div>
         </div>
         <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-2 border rounded" placeholder="Description (Tenue, Niveau...)"/>
-        <div className="flex gap-2"><button type="button" onClick={()=>setIsOpen(false)} className="flex-1 py-2 bg-gray-100 rounded">Annuler</button><button type="submit" className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded font-bold">Valider</button></div>
+        <div className="flex gap-2"><button type="button" onClick={handleClose} className="flex-1 py-2 bg-gray-100 rounded text-gray-600 font-bold">Annuler</button><button type="submit" className="flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded font-bold">{editClassData ? 'Mettre à jour' : 'Valider'}</button></div>
       </form>
     </div>
   );
@@ -277,7 +367,6 @@ export default function App() {
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   
-  // États Globaux
   const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past'>('planning');
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
@@ -286,18 +375,25 @@ export default function App() {
   
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  
+  // Modales
   const [paymentModal, setPaymentModal] = useState<{isOpen: boolean, classId: string | null}>({isOpen: false, classId: null});
+  const [isPaymentInfoOpen, setPaymentInfoOpen] = useState(false);
+  const [isBookingSuccessOpen, setBookingSuccessOpen] = useState(false);
+  
+  const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
 
-  // A. AUTHENTIFICATION
+  // Vérifier s'il y a un paiement en attente
+  const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING');
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthUser(user);
       if (user) {
         onSnapshot(doc(db, "users", user.uid), (snap) => {
-          if (snap.exists()) {
-            setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
-          } else {
-            const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student' };
+          if (snap.exists()) setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
+          else {
+            const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false };
             setDoc(doc(db, "users", user.uid), newUser);
             syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
           }
@@ -308,7 +404,6 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // B. CHARGEMENT DES DONNÉES DE BASE
   const fetchAllData = async () => {
     const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc")));
     const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass));
@@ -325,21 +420,24 @@ export default function App() {
     });
   }, []);
 
-  // C. CHARGEMENT HISTORIQUE 
   useEffect(() => {
-    if (userProfile && activeTab === 'history') {
+    if (userProfile) {
       const q = query(collection(db, "bookings"), where("userId", "==", userProfile.id));
-      onSnapshot(q, (snap) => {
+      const unsub = onSnapshot(q, (snap) => {
         const books = snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo));
         setMyBookings(books.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
       });
+      return () => unsub();
     }
-  }, [userProfile, activeTab]);
+  }, [userProfile]);
 
-  // D. LOGIQUE RÉSERVATION / ANNULATION
+  const handleValidateForm = async () => {
+    if (!userProfile) return;
+    await updateDoc(doc(db, "users", userProfile.id), { hasFilledForm: true });
+    alert("Merci ! Tu peux maintenant réserver des cours.");
+  };
 
   const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
-
   const confirmBooking = async (method: PaymentMethod) => {
     const classId = paymentModal.classId;
     if (!classId || !userProfile) return;
@@ -352,13 +450,10 @@ export default function App() {
         const classDoc = await t.get(classRef); 
         const userDoc = await t.get(userRef);
         
-        const classData = classDoc.data();
-        const userData = userDoc.data();
-
+        const classData = classDoc.data(); const userData = userDoc.data();
         if (!classData || !userData) throw "Données introuvables";
 
         const currentAttendees = classData.attendeeIds || [];
-        
         if (currentAttendees.includes(userProfile.id)) throw "Déjà inscrit !";
         if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
         if (method === 'CREDIT' && userData.credits < 1) throw "Crédit insuffisant";
@@ -367,15 +462,20 @@ export default function App() {
         t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...currentAttendees, userProfile.id] });
         
         const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING';
-        t.set(doc(collection(db, "bookings")), {
+        const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR');
+        const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+
+        t.set(doc(collection(db, "bookings")), { 
           classId, userId: userProfile.id, userName: userProfile.displayName,
           classTitle: classData.title, date: classData.startAt.toDate().toISOString(),
+          dateStr, timeStr, location: classData.location,
           paymentMethod: method, paymentStatus
         });
-        return { title: classData.title, dateStr: classData.startAt.toDate().toLocaleDateString('fr-FR'), timeStr: classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), loc: classData.location, cap: classData.maxCapacity, paymentStatus, method };
+        return { title: classData.title, dateStr, timeStr, loc: classData.location, cap: classData.maxCapacity, paymentStatus, method };
       }).then((d) => {
         syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus });
-        alert("Réservé ! 🎉"); fetchAllData();
+        setBookingSuccessOpen(true); 
+        fetchAllData();
       });
     } catch (e) { alert("Erreur: " + e); }
     setProcessingId(null);
@@ -391,16 +491,11 @@ export default function App() {
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; }
 
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); 
-        const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); 
-        const userDoc = await t.get(userRef);
+        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id);
+        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
+        const classData = classDoc.data(); const userData = userDoc.data();
         
-        const classData = classDoc.data();
-        const userData = userDoc.data();
-
         if (!classData || !userData) throw "Données introuvables";
-
         const currentAttendees = classData.attendeeIds || [];
         
         if (method === 'CREDIT') t.update(userRef, { credits: userData.credits + 1 });
@@ -433,24 +528,44 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans pb-32">
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full max-w-[1600px] mx-auto">
         
-        <header className="flex justify-between items-center mb-6 py-4 border-b border-gray-200">
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 py-4 border-b border-gray-200">
           <div className="flex items-center gap-3">
              {authUser?.photoURL && <img src={authUser.photoURL} className="w-12 h-12 rounded-full border-2 border-amber-200 shadow-sm"/>}
              <div>
                <h1 className="text-lg font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
-               <div className="flex gap-3 text-sm text-gray-500 mt-1">
-                 <button onClick={() => setShowProfile(true)} className="hover:text-amber-600 font-medium">Mon Profil</button>
-                 <span>•</span>
-                 <button onClick={() => signOut(auth)} className="hover:text-red-500">Déconnexion</button>
+               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mt-2">
+                 <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-3 py-1.5 rounded-lg transition-all border ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-200 shadow-[0_0_10px_rgba(239,68,68,0.2)] animate-pulse' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                   Moyens de paiement
+                 </button>
+                 <button onClick={() => setShowProfile(true)} className="text-gray-500 hover:text-amber-600 font-medium">Mon Profil</button>
+                 <span className="text-gray-300 hidden sm:inline">•</span>
+                 <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
                </div>
              </div>
           </div>
-          <div className="px-4 py-2 bg-white border border-amber-100 rounded-xl shadow-sm text-lg font-bold text-amber-700 flex items-center gap-2">
+          <div className="px-4 py-2 bg-white border border-amber-100 rounded-xl shadow-sm text-lg font-bold text-amber-700 flex items-center gap-2 self-start sm:self-auto">
             <Zap size={18} className="fill-amber-600" /> {userProfile?.credits ?? 0}
           </div>
         </header>
+
+        {userProfile && !userProfile.hasFilledForm && (
+          <div className="bg-red-50 border-2 border-red-200 p-4 rounded-2xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-3 text-red-700 font-medium text-sm">
+               <AlertTriangle size={24} className="shrink-0" />
+               <p>Tu dois obligatoirement remplir la <b>fiche d'inscription (santé & droit à l'image)</b> pour pouvoir réserver un cours.</p>
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+               <a href="https://docs.google.com/forms/d/e/1FAIpQLScFB9AwnG5svoixfNDer61h98heVkQP5bRPGww8x05XcNy9HQ/viewform" target="_blank" rel="noreferrer" className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-colors">
+                  <ExternalLink size={16}/> Ouvrir le formulaire
+               </a>
+               <button onClick={handleValidateForm} className="flex-1 md:flex-none px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold transition-colors">
+                  C'est fait !
+               </button>
+            </div>
+          </div>
+        )}
 
         <nav className="flex overflow-x-auto hide-scrollbar gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-gray-100">
           <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}>
@@ -475,10 +590,10 @@ export default function App() {
 
         {activeTab === 'planning' && (
           <div>
-            {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations}/>}
+            {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
             {classes.length === 0 ? ( <div className="bg-white rounded-2xl p-10 text-center text-gray-400">Aucun cours à venir.</div> ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userRole={userProfile?.role} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} />)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6">
+                {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} />)}
               </div>
             )}
           </div>
@@ -516,8 +631,8 @@ export default function App() {
           <div>
             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives des cours terminés</h2>
             {pastClasses.length === 0 ? <p className="text-gray-500">Aucun cours terminé.</p> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 opacity-75">
-                {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userRole="admin" isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} />)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75">
+                {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} />)}
               </div>
             )}
           </div>
@@ -527,6 +642,8 @@ export default function App() {
 
       {showProfile && userProfile && <UserProfileForm user={userProfile} onClose={() => setShowProfile(false)}/>}
       <PaymentModal isOpen={paymentModal.isOpen} onClose={() => setPaymentModal({isOpen:false, classId:null})} onConfirm={confirmBooking} userCredits={userProfile?.credits || 0}/>
+      <PaymentInfoModal isOpen={isPaymentInfoOpen} onClose={() => setPaymentInfoOpen(false)} />
+      <BookingSuccessModal isOpen={isBookingSuccessOpen} onClose={() => setBookingSuccessOpen(false)} />
     </div>
   );
 }
@@ -554,13 +671,16 @@ const AdminStudentsTab = () => {
   const handleUpdateCredit = async (userId: string, newAmount: number) => await updateDoc(doc(db, "users", userId), { credits: newAmount });
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 items-start">
-      <div className="bg-white border-2 border-gray-800 rounded-2xl p-4 w-full md:w-1/3">
+    <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <div className="bg-white border-2 border-gray-800 rounded-2xl p-4 w-full lg:w-1/3">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Users size={18}/> Liste des élèves</h3>
         <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
           {users.map(u => (
             <div key={u.id} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => setSelectedUserId(u.id)}>
-              <span className="font-bold text-sm text-gray-800">{u.displayName}</span>
+              <div className="flex justify-between items-center mb-1">
+                <span className="font-bold text-sm text-gray-800">{u.displayName}</span>
+                {!u.hasFilledForm && <AlertTriangle size={14} className="text-red-500" title="Fiche non remplie" />}
+              </div>
               <span className="text-xs text-gray-500 mb-2">{u.email}</span>
               <div className="flex gap-2 items-center">
                 <button onClick={(e) => { e.stopPropagation(); handleUpdateCredit(u.id, u.credits-1)}} className="w-6 h-6 bg-gray-200 rounded text-xs font-bold">-</button>
@@ -572,7 +692,7 @@ const AdminStudentsTab = () => {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-6 w-full md:w-2/3 min-h-[50vh]">
+      <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-6 w-full lg:w-2/3 min-h-[50vh]">
         {!selectedUserId ? (
           <div className="h-full flex items-center justify-center text-gray-400">Sélectionnez un élève à gauche.</div>
         ) : (
