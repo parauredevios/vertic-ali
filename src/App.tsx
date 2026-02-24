@@ -109,7 +109,7 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
           <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
-            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets <b>pas de crème/huile</b> sur le corps le jour même, tu risques de glisser !</li>
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
           </ul>
         </div>
 
