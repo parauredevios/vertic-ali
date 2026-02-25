@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
-  Smartphone, Building, ShoppingBag, XCircle
+  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -18,10 +18,13 @@ import type { User as FirebaseUser } from 'firebase/auth';
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
 
 // --- 1. MODÈLES & TYPES ---
+interface StudioLocation { id: string; name: string; address: string; }
+interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; }
+
 interface DanceClass {
-  id: string; title: string; description?: string;
+  id: string; title: string; description?: string; price: string;
   startAt: Date; endAt: Date; maxCapacity: number; attendeesCount: number;
-  attendeeIds: string[]; instructor: string; location: string;
+  attendeeIds: string[]; instructor: string; location: string; locationAddress?: string;
 }
 
 interface UserProfile {
@@ -32,7 +35,7 @@ interface UserProfile {
 
 interface BookingInfo {
   id: string; classId: string; userId: string; userName: string; classTitle: string;
-  date: string; dateStr: string; timeStr: string; location: string;
+  date: string; dateStr: string; timeStr: string; location: string; price: string;
   paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
 }
 
@@ -40,7 +43,7 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
-  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL")) return; 
+  if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
     const enrichedPayload = {
       ...payload,
@@ -64,7 +67,6 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
         <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
-
         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
           <div>
             <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero (gratuit et instantané) :</span>
@@ -76,12 +78,10 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
             <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR212***************************</p>
           </div>
         </div>
-
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
         </div>
-
         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
       </div>
     </div>
@@ -96,7 +96,6 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
         <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
         <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
-
         <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
           <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
@@ -105,15 +104,13 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
             <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
             <li>Gourde d'eau</li>
           </ul>
-
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
           <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
           </ul>
         </div>
-
-        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris, à vite !</button>
+        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
       </div>
     </div>
   );
@@ -187,65 +184,163 @@ const UserProfileForm = ({ user, onClose }: any) => {
 
 // --- 4. SOUS-COMPOSANTS ---
 
-const AdminClassAttendees = ({ classId }: { classId: string }) => {
+const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  const [showAddManual, setShowAddManual] = useState(false);
+  const [newManualName, setNewManualName] = useState('');
+  const [newManualMethod, setNewManualMethod] = useState<PaymentMethod>('CASH');
 
   useEffect(() => {
-    const q = query(collection(db, "bookings"), where("classId", "==", classId));
+    const q = query(collection(db, "bookings"), where("classId", "==", classInfo.id));
     const unsub = onSnapshot(q, (snap) => {
       setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)));
       setLoading(false);
     });
     return () => unsub();
-  }, [classId]);
+  }, [classInfo.id]);
 
   const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
     await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus });
-    
-    // Synchro avec Google Sheets : Déplace vers le bon onglet
     syncToSheet({
-      type: 'BOOKING_UPDATE',
-      classId: bookingData.classId,
-      classTitle: bookingData.classTitle,
-      date: bookingData.dateStr,
-      time: bookingData.timeStr,
-      location: bookingData.location || '',
-      studentId: bookingData.userId,
-      studentName: `${bookingData.userName} (${bookingData.paymentMethod})`,
-      paymentStatus: newStatus
+      type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle,
+      date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '',
+      studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`,
+      paymentStatus: newStatus, price: classInfo.price
     });
   };
 
+  const handleAddManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newManualName) return;
+    const manualId = 'manual_' + Date.now();
+    try {
+      await runTransaction(db, async (t) => {
+        const classRef = doc(db, "classes", classInfo.id);
+        const classDoc = await t.get(classRef);
+        const cData = classDoc.data();
+        if(!cData || cData.attendeesCount >= cData.maxCapacity) throw "Cours Complet";
+
+        const currentAttendees = cData.attendeeIds || [];
+        t.update(classRef, { attendeesCount: cData.attendeesCount + 1, attendeeIds: [...currentAttendees, manualId] });
+        
+        const dateStr = classInfo.startAt.toLocaleDateString('fr-FR');
+        const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+        const paymentStatus = newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING';
+
+        t.set(doc(collection(db, "bookings")), { 
+          classId: classInfo.id, userId: manualId, userName: newManualName + " (Manuel)",
+          classTitle: classInfo.title, date: classInfo.startAt.toISOString(),
+          dateStr, timeStr, location: classInfo.location, price: classInfo.price,
+          paymentMethod: newManualMethod, paymentStatus
+        });
+      });
+
+      syncToSheet({ 
+        type: 'BOOKING', classId: classInfo.id, classTitle: classInfo.title, 
+        date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
+        location: classInfo.location, capacity: classInfo.maxCapacity, 
+        studentId: manualId, studentName: `${newManualName} (Manuel) (${newManualMethod})`, 
+        paymentStatus: newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING', price: classInfo.price 
+      });
+      setNewManualName(''); setShowAddManual(false); onRefresh();
+    } catch(e) { alert(e); }
+  };
+
+  const handleRemoveStudent = async (b: BookingInfo) => {
+    if (!window.confirm(`Supprimer ${b.userName} de ce cours ?`)) return;
+    try {
+      await runTransaction(db, async (t) => {
+        const classRef = doc(db, "classes", classInfo.id);
+        const classDoc = await t.get(classRef);
+        const cData = classDoc.data();
+        if(!cData) return;
+
+        if (b.paymentMethod === 'CREDIT' && !b.userId.startsWith('manual_')) {
+          const userRef = doc(db, "users", b.userId);
+          const userDoc = await t.get(userRef);
+          if (userDoc.exists()) t.update(userRef, { credits: userDoc.data().credits + 1 });
+        }
+
+        const currentAttendees = cData.attendeeIds || [];
+        t.update(classRef, { 
+          attendeesCount: Math.max(0, cData.attendeesCount - 1), 
+          attendeeIds: currentAttendees.filter((id: string) => id !== b.userId) 
+        });
+        t.delete(doc(db, "bookings", b.id));
+      });
+
+      syncToSheet({ 
+        type: 'CANCEL', classId: classInfo.id, studentId: b.userId, classTitle: classInfo.title, 
+        date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
+        location: classInfo.location, studentName: `${b.userName} (${b.paymentMethod})`, price: classInfo.price,
+        paymentStatus: b.paymentStatus // ENVOI DU STATUT DE PAIEMENT LORS DE L'ANNULATION
+      });
+      onRefresh();
+    } catch(e) { alert("Erreur suppression"); }
+  };
+
   if (loading) return <div className="p-4 text-center text-gray-400 text-sm">Chargement...</div>;
-  if (bookings.length === 0) return <div className="p-4 text-center text-gray-400 text-sm border-t border-gray-100">Aucun inscrit pour le moment.</div>;
 
   return (
-    <div className="mt-4 border-t border-gray-100 pt-4 space-y-2">
-      <h4 className="text-sm font-bold text-gray-800 mb-2">Élèves inscrits :</h4>
-      {bookings.map(b => (
-        <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left">
-          <div>
-            <span className="font-bold text-gray-700 block">{b.userName}</span>
-            <span className="text-xs text-gray-500">{b.paymentMethod}</span>
-          </div>
-          <button 
-            onClick={() => togglePayment(b.id, b.paymentStatus, b)}
-            disabled={b.paymentMethod === 'CREDIT'} 
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors shrink-0 ${
-              b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-            }`}
-          >
-            {b.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
-          </button>
+    <div className="mt-4 border-t border-gray-100 pt-4 space-y-3">
+      {bookings.length === 0 ? <div className="text-center text-gray-400 text-sm">Aucun inscrit.</div> : (
+        <div className="space-y-2">
+          {bookings.map(b => (
+            <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left border border-gray-100">
+              <div className="flex-1">
+                <span className="font-bold text-gray-700 block">{b.userName}</span>
+                <span className="text-xs text-gray-500">{b.paymentMethod}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => togglePayment(b.id, b.paymentStatus, b)}
+                  disabled={b.paymentMethod === 'CREDIT'} 
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold transition-colors shrink-0 ${
+                    b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                  }`}
+                >
+                  {b.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
+                </button>
+                <button onClick={() => handleRemoveStudent(b)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="Supprimer cet élève">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      <div className="pt-3 border-t border-gray-200 mt-3">
+        {!showAddManual ? (
+          <button type="button" onClick={() => setShowAddManual(true)} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-colors">
+            <UserPlus size={16}/> Ajouter un élève manuellement
+          </button>
+        ) : (
+          <form onSubmit={handleAddManual} className="flex flex-col gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
+            <p className="text-xs font-bold text-gray-500 flex items-center gap-1"><UserPlus size={14}/> Nouvel élève</p>
+            <div className="flex gap-2">
+              <input value={newManualName} onChange={e=>setNewManualName(e.target.value)} placeholder="Nom complet..." className="flex-1 text-sm p-2 border border-gray-300 rounded-lg outline-none focus:border-amber-500" />
+              <select value={newManualMethod} onChange={e=>setNewManualMethod(e.target.value as PaymentMethod)} className="text-sm p-2 border border-gray-300 rounded-lg bg-white outline-none">
+                <option value="CASH">Espèces</option>
+                <option value="WERO_RIB">Virement</option>
+                <option value="CREDIT">Crédit</option>
+              </select>
+            </div>
+            <div className="flex gap-2 mt-1">
+              <button type="button" onClick={() => setShowAddManual(false)} className="flex-1 py-2 text-sm font-bold text-gray-500 bg-white border border-gray-200 rounded-lg">Annuler</button>
+              <button type="submit" disabled={!newManualName || classInfo.attendeesCount >= classInfo.maxCapacity} className="flex-1 py-2 text-sm font-bold text-white bg-gray-800 rounded-lg disabled:opacity-50">Valider</button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const isFull = info.attendeesCount >= info.maxCapacity;
   const isProcessing = processingId === info.id;
@@ -254,7 +349,6 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   return (
     <div className={`bg-white p-5 rounded-2xl shadow-sm border relative flex flex-col justify-between text-left ${isBooked ? 'border-amber-400 ring-4 ring-amber-50' : 'border-gray-100 hover:shadow-md transition-shadow'}`}>
       
-      {/* Menu d'édition Admin */}
       {userProfile?.role === 'admin' && (
         <div className="absolute top-3 right-3 flex gap-2">
            <button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500 transition-colors"><Edit2 size={18}/></button>
@@ -263,22 +357,27 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
       )}
       
       <div>
-        <div className="flex justify-between items-start mb-4 gap-3">
-          <div className="flex-1 min-w-0 pr-6">
-            <h3 className="font-bold text-xl text-gray-800 leading-tight mb-1 truncate">{info.title}</h3>
+        <div className="flex justify-between items-start mb-4 gap-2">
+          <div className="flex-1 pr-4">
+            <h3 className="font-bold text-xl text-gray-800 leading-tight mb-1">{info.title}</h3>
             <p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p>
           </div>
-          <div className="text-xl font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl shrink-0 whitespace-nowrap text-center">
-            {info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}
+          <div className="flex flex-col items-end shrink-0">
+            <div className="text-xl font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl whitespace-nowrap text-center">
+              {info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}
+            </div>
+            {info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 rounded-md">Tarif : {info.price}</span>}
           </div>
         </div>
         
         <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block">Prof : {info.instructor}</span>
-        {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">{info.description}</p>}
+        {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100 whitespace-pre-wrap">{info.description}</p>}
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
-          <span className="flex gap-1.5 items-center"><MapPin size={16}/> {info.location}</span>
+          <a href={`https://www.google.com/maps/search/?api=1&query=$${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
+            <MapPin size={16}/> {info.location}
+          </a>
         </div>
       </div>
 
@@ -303,32 +402,34 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
           <button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 rounded-xl hover:bg-amber-100 transition-colors">
             <Users size={16}/> {showAttendees ? 'Masquer les inscrits' : 'Voir les inscrits'} {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
           </button>
-          {showAttendees && <AdminClassAttendees classId={info.id} />}
+          {showAttendees && <AdminClassAttendees classInfo={info} onRefresh={onRefresh} />}
         </div>
       )}
     </div>
   );
 };
 
-const AdminClassForm = ({ onAdd, locations, editClassData, onCancelEdit }: { onAdd: () => void, locations: string[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
+const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEdit }: { onAdd: () => void, locations: StudioLocation[], templates: ClassTemplate[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [data, setData] = useState({title: 'Pole Débutant', date: '', desc: '', cap: 12, loc: locations[0] || 'Studio A'});
+  const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: ''});
   
   useEffect(() => {
     if (editClassData) {
-      setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location });
+      setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location, price: editClassData.price || '' });
       setIsOpen(true);
     } else {
-      if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0]}));
+      if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name}));
     }
   }, [editClassData, locations]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!data.date) return;
+    e.preventDefault(); if (!data.date || !data.title) return;
     try {
       const start = new Date(data.date);
+      const locObj = locations.find(l => l.name === data.loc);
       const payload = {
-        title: data.title, description: data.desc, instructor: "Ali", location: data.loc,
+        title: data.title, description: data.desc, instructor: "Ali", 
+        location: data.loc, locationAddress: locObj ? locObj.address : '', price: data.price,
         startAt: Timestamp.fromDate(start), endAt: Timestamp.fromDate(new Date(start.getTime() + 90*60000)),
         maxCapacity: Number(data.cap)
       };
@@ -347,21 +448,117 @@ const AdminClassForm = ({ onAdd, locations, editClassData, onCancelEdit }: { onA
   return (
     <div className="bg-white p-6 rounded-2xl mb-8 border border-amber-100 shadow-sm relative text-left">
       <h3 className="font-bold text-amber-800 mb-4 text-lg">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
+      
+      {!editClassData && templates.length > 0 && (
+        <select 
+          className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl font-bold text-amber-900 outline-none"
+          onChange={(e) => {
+            const t = templates.find(x => x.id === e.target.value);
+            if (t) setData({...data, title: t.title, loc: t.locationName, cap: t.maxCapacity, desc: t.description, price: t.price });
+          }}
+        >
+          <option value="">-- Charger un modèle pré-enregistré --</option>
+          {templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+        </select>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
-        <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Titre du cours"/>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border rounded-xl col-span-1 md:col-span-1"/>
+        <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Titre du cours *"/>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border rounded-xl"/>
           <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border rounded-xl bg-white">
-            {locations.map(l => <option key={l} value={l}>{l}</option>)}
+            {locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
           </select>
+          <input type="text" value={data.price} onChange={e=>setData({...data, price: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Tarif (ex: 15€ ou 1 Crédit)"/>
           <div className="flex items-center gap-2 bg-gray-50 px-3 rounded-xl border">
             <span className="text-sm text-gray-500 whitespace-nowrap font-medium">Places:</span>
-            <input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full bg-transparent p-3 outline-none"/>
+            <input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full bg-transparent py-3 outline-none"/>
           </div>
         </div>
-        <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Description (Tenue, Niveau...)"/>
-        <div className="flex gap-3 pt-2"><button type="button" onClick={handleClose} className="flex-1 py-3 bg-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-200">Annuler</button><button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold">{editClassData ? 'Mettre à jour' : 'Valider'}</button></div>
+        <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border rounded-xl min-h-[100px]" placeholder="Description (Tenue, Niveau...)"/>
+        <div className="flex gap-3 pt-2">
+          <button type="button" onClick={handleClose} className="flex-1 py-3 bg-gray-100 rounded-xl text-gray-600 font-bold hover:bg-gray-200">Annuler</button>
+          <button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold">{editClassData ? 'Mettre à jour' : 'Valider'}</button>
+        </div>
       </form>
+    </div>
+  );
+};
+
+const AdminSettingsTab = ({ locations, templates }: { locations: StudioLocation[], templates: ClassTemplate[] }) => {
+  const [newLocName, setNewLocName] = useState('');
+  const [newLocAddress, setNewLocAddress] = useState('');
+  const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '' });
+
+  const addLocation = async () => {
+    if (!newLocName) return;
+    const newLoc = { id: Date.now().toString(), name: newLocName, address: newLocAddress };
+    await setDoc(doc(db, "settings", "general"), { locations: [...locations, newLoc] }, { merge: true });
+    setNewLocName(''); setNewLocAddress('');
+  };
+  const removeLocation = async (id: string) => {
+    if(!confirm("Supprimer ce lieu ?")) return;
+    await setDoc(doc(db, "settings", "general"), { locations: locations.filter(l => l.id !== id) }, { merge: true });
+  };
+
+  const addTemplate = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!newTpl.title) return;
+    const newT = { id: Date.now().toString(), title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc };
+    await setDoc(doc(db, "settings", "general"), { templates: [...templates, newT] }, { merge: true });
+    setNewTpl({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '' });
+  };
+  const removeTemplate = async (id: string) => {
+    if(!confirm("Supprimer ce modèle ?")) return;
+    await setDoc(doc(db, "settings", "general"), { templates: templates.filter(t => t.id !== id) }, { merge: true });
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+        <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Map className="text-indigo-500"/> Gestion des Lieux</h3>
+        <div className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
+          <input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="Nom du lieu (ex: Studio A)" className="p-2 border rounded-lg text-sm outline-none"/>
+          <input value={newLocAddress} onChange={e=>setNewLocAddress(e.target.value)} placeholder="Adresse complète (pour le GPS)" className="p-2 border rounded-lg text-sm outline-none"/>
+          <button onClick={addLocation} className="bg-indigo-600 text-white font-bold py-2 rounded-lg hover:bg-indigo-700">Ajouter le lieu</button>
+        </div>
+        <div className="space-y-2">
+          {locations.map(l => (
+            <div key={l.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+              <div><p className="font-bold text-sm text-gray-800">{l.name}</p><p className="text-xs text-gray-500 truncate max-w-[200px]">{l.address}</p></div>
+              <button onClick={() => removeLocation(l.id)} className="text-red-500 p-2 hover:bg-red-50 rounded-md"><Trash2 size={16}/></button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+        <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Plus className="text-amber-500"/> Modèles de cours</h3>
+        <form onSubmit={addTemplate} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
+          <input value={newTpl.title} onChange={e=>setNewTpl({...newTpl, title: e.target.value})} placeholder="Titre du modèle" className="p-2 border rounded-lg text-sm outline-none"/>
+          <div className="grid grid-cols-2 gap-2">
+            <select value={newTpl.loc} onChange={e=>setNewTpl({...newTpl, loc: e.target.value})} className="p-2 border rounded-lg text-sm outline-none bg-white">
+              {locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
+            </select>
+            <input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="p-2 border rounded-lg text-sm outline-none"/>
+          </div>
+          <div className="flex gap-2 items-center">
+            <span className="text-sm text-gray-500 whitespace-nowrap bg-white px-2 py-2 border rounded-lg">Capacité:</span>
+            <input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} className="p-2 border rounded-lg text-sm w-full outline-none"/>
+          </div>
+          <textarea value={newTpl.desc} onChange={e=>setNewTpl({...newTpl, desc: e.target.value})} placeholder="Description par défaut..." className="p-2 border rounded-lg text-sm outline-none min-h-[60px]"/>
+          <button type="submit" className="bg-amber-600 text-white font-bold py-2 rounded-lg hover:bg-amber-700">Créer le modèle</button>
+        </form>
+        <div className="space-y-2">
+          {templates.map(t => (
+            <div key={t.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+              <div>
+                <p className="font-bold text-sm text-gray-800">{t.title}</p>
+                <p className="text-xs text-gray-500">{t.locationName} • {t.price} • {t.maxCapacity} pl.</p>
+              </div>
+              <button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2 hover:bg-red-50 rounded-md"><Trash2 size={16}/></button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
@@ -372,23 +569,21 @@ export default function App() {
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   
-  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past'>('planning');
+  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past' | 'admin_settings'>('planning');
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
-  const [locations, setLocations] = useState<string[]>(['Studio Picardia']);
+  const [locations, setLocations] = useState<StudioLocation[]>([]);
+  const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [myBookings, setMyBookings] = useState<BookingInfo[]>([]);
   
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   
-  // Modales
   const [paymentModal, setPaymentModal] = useState<{isOpen: boolean, classId: string | null}>({isOpen: false, classId: null});
   const [isPaymentInfoOpen, setPaymentInfoOpen] = useState(false);
   const [isBookingSuccessOpen, setBookingSuccessOpen] = useState(false);
   
   const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
-
-  // Vérifier s'il y a un paiement en attente pour le badge clignotant
   const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING');
 
   useEffect(() => {
@@ -420,8 +615,17 @@ export default function App() {
   useEffect(() => {
     fetchAllData();
     onSnapshot(doc(db, "settings", "general"), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().locations) setLocations(docSnap.data().locations);
-      else setDoc(doc(db, "settings", "general"), { locations: ['Studio Picardia'] }, { merge: true });
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.locations && data.locations.length > 0 && typeof data.locations[0] === 'string') {
+          setLocations(data.locations.map((l: string, i: number) => ({ id: i.toString(), name: l, address: '' })));
+        } else {
+          setLocations(data.locations || []);
+        }
+        setTemplates(data.templates || []);
+      } else {
+        setDoc(doc(db, "settings", "general"), { locations: [], templates: [] });
+      }
     });
   }, []);
 
@@ -473,12 +677,12 @@ export default function App() {
         t.set(doc(collection(db, "bookings")), { 
           classId, userId: userProfile.id, userName: userProfile.displayName,
           classTitle: classData.title, date: classData.startAt.toDate().toISOString(),
-          dateStr, timeStr, location: classData.location,
+          dateStr, timeStr, location: classData.location, price: classData.price || '',
           paymentMethod: method, paymentStatus
         });
-        return { title: classData.title, dateStr, timeStr, loc: classData.location, cap: classData.maxCapacity, paymentStatus, method };
+        return { title: classData.title, dateStr, timeStr, loc: classData.location, cap: classData.maxCapacity, paymentStatus, method, price: classData.price || '' };
       }).then((d) => {
-        syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus });
+        syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.price });
         setBookingSuccessOpen(true); 
         fetchAllData();
       });
@@ -492,8 +696,12 @@ export default function App() {
     try {
       const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", userProfile.id));
       const snap = await getDocs(q);
-      let method = 'CASH'; let bookingId = null;
-      if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; }
+      let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
+      if (!snap.empty) { 
+        bookingId = snap.docs[0].id; 
+        method = snap.docs[0].data().paymentMethod; 
+        pStatus = snap.docs[0].data().paymentStatus;
+      }
 
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id);
@@ -508,13 +716,20 @@ export default function App() {
         if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
 
-      syncToSheet({ type: 'CANCEL', classId, studentId: userProfile.id });
+      const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
+      if(cTarget) {
+         syncToSheet({ 
+           type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, 
+           date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
+           location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '',
+           paymentStatus: pStatus // ENVOI DU STATUT DE PAIEMENT LORS DE L'ANNULATION
+         });
+      }
       alert("Réservation annulée !"); fetchAllData();
     } catch (e) { alert("Erreur: " + e); }
     setProcessingId(null);
   };
 
-  // --- RENDU UI ---
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
@@ -541,11 +756,9 @@ export default function App() {
              <div>
                <h1 className="text-xl font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm mt-2">
-                 
                  <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-4 py-1.5 rounded-lg transition-all border-2 ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
                    Moyens de paiement
                  </button>
-                 
                  <span className="text-gray-300 hidden sm:inline">•</span>
                  <button onClick={() => setShowProfile(true)} className="text-gray-500 hover:text-amber-600 font-medium">Mon Profil</button>
                  <span className="text-gray-300 hidden sm:inline">•</span>
@@ -592,16 +805,19 @@ export default function App() {
               <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_past' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                 <Archive size={18}/> Cours Passés
               </button>
+              <button onClick={() => setActiveTab('admin_settings')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                <Settings size={18}/> Réglages
+              </button>
             </>
           )}
         </nav>
 
         {activeTab === 'planning' && (
           <div>
-            {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
+            {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
             {classes.length === 0 ? ( <div className="bg-white rounded-2xl p-10 text-center text-gray-400">Aucun cours à venir.</div> ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">
-                {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} />)}
+                {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} onRefresh={fetchAllData} />)}
               </div>
             )}
           </div>
@@ -618,8 +834,9 @@ export default function App() {
                       <h3 className="font-bold text-gray-800">{b.classTitle}</h3>
                       <p className="text-sm text-gray-500 capitalize">{new Date(b.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'})}</p>
                     </div>
-                    <div className="text-right">
-                      <span className="text-xs font-bold text-gray-500 block mb-1">Via {b.paymentMethod}</span>
+                    <div className="text-right flex flex-col items-end gap-1">
+                      {b.price && <span className="text-xs font-bold text-gray-400">Tarif: {b.price}</span>}
+                      <span className="text-xs font-bold text-gray-500">Via {b.paymentMethod}</span>
                       <span className={`text-xs font-bold px-2 py-1 rounded-md ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
                         {b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}
                       </span>
@@ -640,10 +857,14 @@ export default function App() {
             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives des cours terminés</h2>
             {pastClasses.length === 0 ? <p className="text-gray-500">Aucun cours terminé.</p> : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">
-                {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} />)}
+                {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'admin_settings' && userProfile?.role === 'admin' && (
+          <AdminSettingsTab locations={locations} templates={templates} />
         )}
 
       </div>
@@ -687,7 +908,6 @@ const AdminStudentsTab = () => {
             <div key={u.id} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => setSelectedUserId(u.id)}>
               <div className="flex justify-between items-center mb-1">
                 <span className="font-bold text-sm text-gray-800">{u.displayName}</span>
-                {/* CORRECTION DU BOUTON ALERT TRIANGLE POUR VERCEL ICI */}
                 {!u.hasFilledForm && (
                   <span title="Fiche non remplie">
                     <AlertTriangle size={14} className="text-red-500" />
