@@ -36,10 +36,10 @@ interface UserProfile {
 interface BookingInfo {
   id: string; classId: string; userId: string; userName: string; classTitle: string;
   date: string; dateStr: string; timeStr: string; location: string; price: string;
-  paymentMethod: 'CREDIT' | 'CASH' | 'Wero_Paypal'; paymentStatus: 'PAID' | 'PENDING';
+  paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
 }
 
-type PaymentMethod = 'CREDIT' | 'CASH' | 'Wero_Paypal';
+type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
@@ -69,13 +69,13 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
         <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
           <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero (gratuit et instantané) :</span>
-            <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06********</p>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PayPal :</span>
+            <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
           </div>
           <hr className="border-gray-200"/>
           <div>
             <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
-            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR212***************************</p>
+            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">Bientôt dispo</p>
           </div>
         </div>
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
@@ -107,10 +107,10 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
           <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
-            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets <b>pas de crème/huile</b> sur le corps le jour même, tu risques de glisser !</li>
           </ul>
         </div>
-        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
+        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris, à vite !</button>
       </div>
     </div>
   );
@@ -128,7 +128,7 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
             <span className="text-xs">Solde: {userCredits}</span>
           </button>
           <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
-          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button>
+          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Wero - PayPal</span></button>
         </div>
         <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
       </div>
