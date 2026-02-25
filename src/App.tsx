@@ -36,10 +36,10 @@ interface UserProfile {
 interface BookingInfo {
   id: string; classId: string; userId: string; userName: string; classTitle: string;
   date: string; dateStr: string; timeStr: string; location: string; price: string;
-  paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
+  paymentMethod: 'CREDIT' | 'CASH' | 'Wero_Paypal'; paymentStatus: 'PAID' | 'PENDING';
 }
 
-type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
+type PaymentMethod = 'CREDIT' | 'CASH' | 'Wero_Paypal';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
