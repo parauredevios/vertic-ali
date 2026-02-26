@@ -1145,11 +1145,6 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
             <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PayPal :</span>
             <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
           </div>
-          <hr className="border-gray-200"/>
-          <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
-            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
-          </div>
         </div>
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
