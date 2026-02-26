@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map, FileText, Download, FileCheck,
-  LayoutDashboard, BellRing, TrendingUp, Briefcase, FileSignature
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
