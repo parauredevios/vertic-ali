@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
-  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map
+  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map, FileText, Download, FileCheck
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -12,6 +12,7 @@ import {
   GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged 
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
+import jsPDF from 'jspdf'; 
 
 // --- CONFIGURATION ---
 // ⚠️ COLLE TON URL GOOGLE SCRIPT ICI ⚠️
@@ -25,6 +26,7 @@ interface DanceClass {
   id: string; title: string; description?: string; price: string;
   startAt: Date; endAt: Date; maxCapacity: number; attendeesCount: number;
   attendeeIds: string[]; instructor: string; location: string; locationAddress?: string;
+  invoiceArchived?: boolean; 
 }
 
 interface UserProfile {
@@ -58,6 +60,148 @@ const syncToSheet = async (payload: any) => {
 
 const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
+// --- FONCTION GENERATION PDF (FACTURE AU FORMAT DE LA CHEF) ---
+const getBase64ImageFromUrl = async (imageUrl: string) => {
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } else reject('Canvas error');
+    };
+    img.onerror = reject;
+    img.src = imageUrl;
+  });
+};
+
+const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: DanceClass) => {
+  const doc = new jsPDF();
+  const dateStr = new Date().toLocaleDateString('fr-FR');
+  const invNumber = `FAC-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${booking.userId.slice(0,4).toUpperCase()}`;
+
+  // 1. Essayer de charger le logo
+  try {
+    const logoBase64 = await getBase64ImageFromUrl('/logo.png');
+    doc.addImage(logoBase64, 'PNG', 15, 15, 35, 35); // Logo en haut à gauche
+  } catch (e) {
+    // Si pas de logo, on écrit juste le nom
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("Vertic'Ali", 15, 25);
+  }
+
+  // 2. En-tête droit (FACTURE)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(212, 175, 55); // Doré Vertic'Ali
+  doc.text("FACTURE", 150, 25);
+  
+  doc.setTextColor(0, 0, 0); // Noir
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("N° facture", 150, 35);
+  doc.setFont("helvetica", "normal");
+  doc.text(invNumber, 150, 40);
+  
+  doc.setFont("helvetica", "bold");
+  doc.text("Date facture", 150, 50);
+  doc.setFont("helvetica", "normal");
+  doc.text(dateStr, 150, 55);
+
+  // 3. Infos Client
+  doc.setFont("helvetica", "bold");
+  doc.text("Facturé à :", 15, 60);
+  doc.setFont("helvetica", "normal");
+  const clientName = booking.userName.replace(" (Manuel)", "");
+  doc.text(clientName, 15, 65);
+  if (studentProfile?.street) {
+    doc.text(studentProfile.street, 15, 70);
+    doc.text(`${studentProfile.zipCode || ''} ${studentProfile.city || ''}`, 15, 75);
+  } else {
+    doc.text("Adresse non renseignée", 15, 70);
+  }
+
+  // 4. Tableau Entêtes
+  doc.setFillColor(212, 175, 55); // Doré
+  doc.rect(15, 90, 180, 8, 'F');
+  doc.setTextColor(255, 255, 255); // Texte Blanc
+  doc.setFont("helvetica", "bold");
+  doc.text("Description", 20, 95.5);
+  doc.text("Qté", 110, 95.5);
+  doc.text("Prix unitaire", 130, 95.5);
+  doc.text("TVA (%)", 155, 95.5);
+  doc.text("Montant HT", 175, 95.5);
+
+  // 5. Ligne de la facture
+  doc.setTextColor(0, 0, 0); // Texte Noir
+  doc.setFont("helvetica", "normal");
+  
+  // Formatage propre du prix
+  let rawPrice = classInfo.price || '0';
+  rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim();
+  if (isNaN(Number(rawPrice))) rawPrice = "0"; // Sécurité
+  const priceVal = `${rawPrice},00 €`;
+  
+  doc.text(classInfo.title, 20, 105);
+  doc.setFontSize(8);
+  doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 110);
+  
+  doc.setFontSize(10);
+  doc.text("1", 112, 105);
+  doc.text(priceVal, 130, 105);
+  doc.text("0", 160, 105);
+  doc.text(priceVal, 175, 105);
+  
+  // Ligne de séparation
+  doc.setDrawColor(200);
+  doc.line(15, 115, 195, 115);
+
+  // 6. Totaux
+  doc.setFont("helvetica", "bold");
+  doc.text("Total HT", 140, 125);
+  doc.text("TVA", 140, 132);
+  doc.text("Total TTC", 140, 142);
+  
+  doc.setFont("helvetica", "normal");
+  doc.text(priceVal, 175, 125);
+  doc.text("0,00 €", 175, 132);
+  
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(212, 175, 55);
+  doc.text(priceVal, 175, 142);
+
+  // 7. Mentions Légales (Bas de page)
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(80);
+  const footerLines = [
+    "TVA non applicable selon l'article 293B du code général des impôts.",
+    "Pas d'escompte accordé pour paiement anticipé.",
+    "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.",
+    "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.",
+    "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL",
+    "",
+    "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle",
+    "18 rue Maurice Domon, Appt C22, 80000 AMIENS",
+    "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com",
+    "SIRET: 94819885800029"
+  ];
+  
+  let y = 230;
+  footerLines.forEach(line => {
+    doc.text(line, 105, y, { align: "center" });
+    y += 4.5;
+  });
+
+  doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
+};
+
 // --- 3. MODALES ---
 
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
@@ -67,21 +211,24 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
         <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
+
         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
           <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PayPal :</span>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> PayPal - Wero :</span>
             <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
           </div>
           <hr className="border-gray-200"/>
           <div>
             <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
-            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">Bientôt dispo</p>
+            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
           </div>
         </div>
+
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
+          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom Prénom + date du cours</span></p>
         </div>
+
         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
       </div>
     </div>
@@ -96,6 +243,7 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
         <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
         <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
+
         <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
           <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
@@ -104,12 +252,14 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
             <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
             <li>Gourde d'eau</li>
           </ul>
+
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
           <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
           </ul>
         </div>
+
         <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
       </div>
     </div>
@@ -128,7 +278,7 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
             <span className="text-xs">Solde: {userCredits}</span>
           </button>
           <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
-          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Wero - PayPal</span></button>
+          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">PayPal / Wero</span></button>
         </div>
         <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
       </div>
@@ -182,7 +332,113 @@ const UserProfileForm = ({ user, onClose }: any) => {
   );
 };
 
-// --- 4. SOUS-COMPOSANTS ---
+// --- ONGLET FACTURES ADMIN (AVEC ARCHIVES) ---
+const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[], onRefresh: () => void }) => {
+  const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED'>('PENDING');
+  const [expandedClass, setExpandedClass] = useState<string | null>(null);
+  const [classBookings, setClassBookings] = useState<BookingInfo[]>([]);
+  const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
+
+  const classesToDisplay = pastClasses.filter(c => viewMode === 'PENDING' ? !c.invoiceArchived : c.invoiceArchived);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const snap = await getDocs(collection(db, "users"));
+      const usersMap: any = {};
+      snap.docs.forEach(d => { usersMap[d.id] = { id: d.id, ...d.data() }; });
+      setUsersInfo(usersMap);
+    };
+    fetchUsers();
+  }, []);
+
+  const loadBookings = async (classId: string) => {
+    if (expandedClass === classId) { setExpandedClass(null); return; }
+    const snap = await getDocs(query(collection(db, "bookings"), where("classId", "==", classId)));
+    setClassBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)));
+    setExpandedClass(classId);
+  };
+
+  const generateAll = (classInfo: DanceClass) => {
+    classBookings.forEach(b => {
+      const u = usersInfo[b.userId] || null;
+      generateInvoicePDF(b, u, classInfo);
+    });
+  };
+
+  const toggleArchiveStatus = async (classId: string, currentStatus: boolean | undefined) => {
+    const msg = currentStatus ? "Désarchiver et remettre dans 'À traiter' ?" : "Archiver ce cours ? Il n'apparaîtra plus dans la liste 'À traiter'.";
+    if(!confirm(msg)) return;
+    await updateDoc(doc(db, "classes", classId), { invoiceArchived: !currentStatus });
+    onRefresh();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2 p-1 bg-gray-200 rounded-xl w-fit">
+        <button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>À traiter</button>
+        <button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Archives</button>
+      </div>
+
+      {classesToDisplay.length === 0 ? (
+        <div className="bg-white p-10 rounded-2xl shadow-sm text-center text-gray-500">
+          {viewMode === 'PENDING' ? "Tous les cours passés ont été archivés. Aucune facture en attente !" : "Aucune archive pour le moment."}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {classesToDisplay.map(c => (
+            <div key={c.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden text-left">
+              <div className="p-4 bg-gray-50 flex justify-between items-center cursor-pointer" onClick={() => loadBookings(c.id)}>
+                <div>
+                  <h3 className="font-bold text-gray-800 text-lg">{c.title}</h3>
+                  <p className="text-sm text-gray-500">{c.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})} à {c.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-sm font-bold bg-white px-3 py-1 rounded-lg border border-gray-200 shadow-sm"><Users size={14} className="inline mr-1"/> {c.attendeesCount}</span>
+                  {expandedClass === c.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}
+                </div>
+              </div>
+              
+              {expandedClass === c.id && (
+                <div className="p-5 border-t border-gray-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <button onClick={() => generateAll(c)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors">
+                      <Download size={16}/> Tout télécharger
+                    </button>
+                    <button onClick={() => toggleArchiveStatus(c.id, c.invoiceArchived)} className="text-gray-500 hover:text-indigo-600 font-bold text-sm flex items-center gap-1 transition-colors">
+                      {c.invoiceArchived ? <><FileCheck size={16}/> Désarchiver</> : <><Archive size={16}/> Archiver le cours</>}
+                    </button>
+                  </div>
+
+                  {classBookings.length === 0 ? <p className="text-sm text-gray-400">Aucun élève inscrit.</p> : (
+                    <div className="space-y-2">
+                      {classBookings.map(b => {
+                        const u = usersInfo[b.userId];
+                        return (
+                          <div key={b.id} className="flex justify-between items-center bg-white border border-gray-100 p-3 rounded-xl hover:shadow-sm transition-shadow">
+                            <div>
+                              <p className="font-bold text-gray-800 text-sm">{b.userName.replace(' (Manuel)', '')}</p>
+                              <p className="text-xs text-gray-500">{u?.street ? `${u.city}` : 'Adresse manquante'} • Payé via {b.paymentMethod}</p>
+                            </div>
+                            <button onClick={() => generateInvoicePDF(b, u || null, c)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-2 rounded-lg transition-colors font-bold text-xs flex items-center gap-1">
+                              <FileText size={14}/> Générer
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// --- SOUS-COMPOSANTS DES COURS ---
 
 const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
@@ -276,7 +532,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
         type: 'CANCEL', classId: classInfo.id, studentId: b.userId, classTitle: classInfo.title, 
         date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
         location: classInfo.location, studentName: `${b.userName} (${b.paymentMethod})`, price: classInfo.price,
-        paymentStatus: b.paymentStatus // ENVOI DU STATUT DE PAIEMENT LORS DE L'ANNULATION
+        paymentStatus: b.paymentStatus 
       });
       onRefresh();
     } catch(e) { alert("Erreur suppression"); }
@@ -375,7 +631,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
-          <a href={`https://www.google.com/maps/search/?api=1&query=$${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
+          <a href={`http://googleusercontent.com/maps.google.com/4{encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
             <MapPin size={16}/> {info.location}
           </a>
         </div>
@@ -569,7 +825,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   
-  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past' | 'admin_settings'>('planning');
+  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past' | 'admin_settings' | 'admin_invoices'>('planning');
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]);
@@ -722,7 +978,7 @@ export default function App() {
            type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, 
            date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
            location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '',
-           paymentStatus: pStatus // ENVOI DU STATUT DE PAIEMENT LORS DE L'ANNULATION
+           paymentStatus: pStatus 
          });
       }
       alert("Réservation annulée !"); fetchAllData();
@@ -799,6 +1055,9 @@ export default function App() {
           {userProfile?.role === 'admin' && (
             <>
               <div className="w-px bg-gray-200 my-2 mx-2"></div>
+              <button onClick={() => setActiveTab('admin_invoices')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>
+                <FileText size={18}/> Factures
+              </button>
               <button onClick={() => setActiveTab('admin_students')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_students' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                 <Users size={18}/> Tous les Élèves
               </button>
@@ -846,6 +1105,10 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && (
+          <AdminInvoicesTab pastClasses={pastClasses} onRefresh={fetchAllData} />
         )}
 
         {activeTab === 'admin_students' && userProfile?.role === 'admin' && (
