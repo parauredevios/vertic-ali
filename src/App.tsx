@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map, FileText, Download, FileCheck,
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -43,7 +43,6 @@ interface BookingInfo {
   paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
 }
 
-// NOUVEAU: Types B2B
 interface ProClient { id: string; name: string; address: string; siret?: string; }
 interface B2BInvoice {
   id: string; clientId: string; clientName: string; date: string;
@@ -143,7 +142,6 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
   footerLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4.5; });
 };
 
-// Facture B2C (Élève)
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: DanceClass) => {
   const doc = new jsPDF();
   const dateStr = new Date().toLocaleDateString('fr-FR');
@@ -167,7 +165,6 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
 };
 
-// Facture B2B (Professionnel)
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
   const doc = new jsPDF();
   const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
@@ -189,135 +186,16 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
   doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'')}.pdf`);
 };
 
-// --- 3. MODALES TRANSVERSES ---
-
-const PaymentInfoModal = ({ isOpen, onClose }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
-        <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
-          <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PaypPal :</span>
-            <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
-          </div>
-          <hr className="border-gray-200"/>
-          <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
-            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
-          </div>
-        </div>
-        <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
-          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
-        </div>
-        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
-      </div>
-    </div>
-  );
-};
-
-const BookingSuccessModal = ({ isOpen, onClose }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
-        <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
-        <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
-        <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
-          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
-          <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
-          <ul className="text-sm text-amber-800 space-y-2 mb-5 list-disc pl-5 font-medium">
-            <li>Short court + brassière <span className="font-normal opacity-80">(la peau doit accrocher !)</span></li>
-            <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
-            <li>Gourde d'eau</li>
-          </ul>
-          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
-          <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
-            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
-            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
-          </ul>
-        </div>
-        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
-      </div>
-    </div>
-  );
-};
-
-const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3>
-        <div className="space-y-3">
-          <button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-400'}`}>
-            <div className="flex items-center gap-3"><Zap size={20}/> <span className="font-bold">1 Crédit</span></div>
-            <span className="text-xs">Solde: {userCredits}</span>
-          </button>
-          <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
-          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button>
-        </div>
-        <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
-      </div>
-    </div>
-  );
-};
-
-const UserProfileForm = ({ user, onClose }: any) => {
-  const [formData, setFormData] = useState({
-    street: user.street || '', zipCode: user.zipCode || '', city: user.city || '',
-    phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || ''
-  });
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true);
-    try {
-      await updateDoc(doc(db, "users", user.id), formData);
-      await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, ...formData });
-      alert("Profil enregistré ! ✅"); onClose();
-    } catch (e) { alert("Erreur sauvegarde"); }
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl h-[85vh] overflow-y-auto">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2"><User className="text-amber-600"/> Mon Profil</h2>
-        <form onSubmit={handleSave} className="space-y-4">
-          <div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500"><p><strong>{user.displayName}</strong></p><p>{user.email}</p></div>
-          <div className="space-y-3">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2"><Phone size={16}/> Coordonnées</h3>
-            <input placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 border rounded-xl" />
-            <h3 className="font-bold text-gray-900 flex items-center gap-2 mt-4"><Home size={16}/> Adresse</h3>
-            <input placeholder="Numéro et Rue" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl" />
-            <div className="flex gap-2">
-              <input placeholder="Code Postal" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl" />
-              <input placeholder="Ville" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl" />
-            </div>
-          </div>
-          <div className="space-y-3 mt-4 pt-4 border-t">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Urgence</h3>
-            <input placeholder="Nom contact urgence" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl" />
-            <input placeholder="Tél contact urgence" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl" />
-          </div>
-          <button type="submit" disabled={saving} className="w-full py-3 mt-6 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-xl shadow-lg hover:from-amber-600 hover:to-amber-700">{saving ? '...' : 'Enregistrer'}</button>
-          <button type="button" onClick={onClose} className="w-full py-3 text-gray-500 font-bold">Annuler</button>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// --- TABLEAU DE BORD ADMIN ---
+// --- TABLEAU DE BORD ADMIN (AVEC EXPORT URSSAF) ---
 const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
   const [stats, setStats] = useState({ caMonthB2C: 0, caMonthB2B: 0, pendingCount: 0 });
-  const [reminders, setReminders] = useState<any[]>([]); // Mix de BookingInfo et B2BInvoice
+  const [reminders, setReminders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // States pour l'export URSSAF
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -327,7 +205,6 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       let caB2C = 0; let caB2B = 0;
       let lateItems: any[] = [];
 
-      // 1. Récupération des cours B2C
       const snapB2C = await getDocs(query(collection(db, "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo;
@@ -351,7 +228,6 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
         }
       });
 
-      // 2. Récupération des Prestations B2B
       const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice;
@@ -381,6 +257,96 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
     fetchDashboardData();
   }, [reminderDays]);
 
+  // FONCTION MAGIQUE : EXPORT URSSAF CSV
+  const handleExportCSV = async (start: Date, end: Date, periodName: string) => {
+    setIsExporting(true);
+    try {
+      const endOfDay = new Date(end);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      let exportRows: any[] = [];
+
+      // 1. Récupération B2C (Élèves Payés)
+      const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID")));
+      snapB2C.docs.forEach(d => {
+        const b = d.data() as BookingInfo;
+        const bDate = new Date(b.date);
+        if (bDate >= start && bDate <= endOfDay) {
+          let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim());
+          if (!isNaN(priceNum) && priceNum > 0) { // Ne pas compter les prix mal formés ou à 0
+            exportRows.push({
+              dateObj: bDate, dateStr: bDate.toLocaleDateString('fr-FR'),
+              type: 'B2C (Élève)', client: b.userName.replace(' (Manuel)', ''),
+              desc: b.classTitle, method: b.paymentMethod, amount: priceNum
+            });
+          }
+        }
+      });
+
+      // 2. Récupération B2B (Pros Payés)
+      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID")));
+      snapB2B.docs.forEach(d => {
+        const b = d.data() as B2BInvoice;
+        const bDate = new Date(b.date);
+        if (bDate >= start && bDate <= endOfDay) {
+          exportRows.push({
+            dateObj: bDate, dateStr: bDate.toLocaleDateString('fr-FR'),
+            type: 'B2B (PRO)', client: b.clientName,
+            desc: b.desc, method: b.paymentMethod, amount: b.total
+          });
+        }
+      });
+
+      // Tri chronologique
+      exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+      // Construction du CSV avec le BOM UTF-8 (pour qu'Excel lise bien les accents français)
+      let csvContent = "Date;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n";
+      let totalAmount = 0;
+      
+      exportRows.forEach(r => {
+        // Remplacement des sauts de ligne et guillemets pour éviter de casser le CSV
+        const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); 
+        const safeClient = r.client.replace(/"/g, '""');
+        csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`;
+        totalAmount += r.amount;
+      });
+      
+      // Ligne de Total à la fin
+      csvContent += `;;;;TOTAL;${totalAmount}\n`;
+
+      // Création et téléchargement du fichier
+      const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Export_URSSAF_${periodName}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } catch (error) {
+      alert("Erreur lors de la création de l'export.");
+    }
+    setIsExporting(false);
+  };
+
+  const exportCurrentMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    handleExportCSV(firstDay, lastDay, `Mois_${now.getMonth()+1}_${now.getFullYear()}`);
+  };
+
+  const exportCustomPeriod = () => {
+    if (!exportStartDate || !exportEndDate) return alert("Veuillez sélectionner les deux dates.");
+    const start = new Date(exportStartDate);
+    const end = new Date(exportEndDate);
+    if (start > end) return alert("La date de début doit être avant la date de fin.");
+    handleExportCSV(start, end, `Periode_${exportStartDate}_au_${exportEndDate}`);
+  };
+
   if (loading) return <div className="text-center p-10 text-gray-500"><Loader2 className="animate-spin inline mr-2"/> Chargement des statistiques...</div>;
 
   return (
@@ -409,10 +375,44 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
         </div>
       </div>
 
+      {/* --- NOUVEAU : ENCART EXPORT URSSAF --- */}
+      <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl"><FileSpreadsheet size={24}/></div>
+            <div>
+              <h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3>
+              <p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes (B2C et B2B) au format Excel CSV.</p>
+            </div>
+          </div>
+          <button 
+            onClick={exportCurrentMonth} 
+            disabled={isExporting}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
+          >
+            {isExporting ? <Loader2 className="animate-spin" size={18}/> : <Download size={18}/>} Export du Mois en cours
+          </button>
+        </div>
+        
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row items-center gap-4">
+          <span className="text-sm font-bold text-gray-600 whitespace-nowrap">Ou choisir une période :</span>
+          <input type="date" value={exportStartDate} onChange={e=>setExportStartDate(e.target.value)} className="w-full md:w-auto p-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 outline-none" />
+          <span className="text-sm font-bold text-gray-400">à</span>
+          <input type="date" value={exportEndDate} onChange={e=>setExportEndDate(e.target.value)} className="w-full md:w-auto p-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 outline-none" />
+          <button 
+            onClick={exportCustomPeriod} 
+            disabled={isExporting || !exportStartDate || !exportEndDate}
+            className="w-full md:w-auto bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors disabled:opacity-50"
+          >
+            Exporter
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
           <AlertTriangle className="text-orange-500"/>
-          <h3 className="font-bold text-gray-800 text-lg">Paiements en retard (Plus de {reminderDays} jours)</h3>
+          <h3 className="font-bold text-gray-800 text-lg">Règlements à relancer (Retard &gt; {reminderDays} j)</h3>
         </div>
         <div className="p-5">
           {reminders.length === 0 ? (
@@ -449,7 +449,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
   const [classBookings, setClassBookings] = useState<BookingInfo[]>([]);
   const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
   
-  // States B2B
   const [proClients, setProClients] = useState<ProClient[]>([]);
   const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
   const [newProClient, setNewProClient] = useState<Partial<ProClient>>({});
@@ -472,7 +471,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
     fetchAll();
   }, [viewMode]);
 
-  // Logique B2C
   const loadBookings = async (classId: string) => {
     if (expandedClass === classId) { setExpandedClass(null); return; }
     const snap = await getDocs(query(collection(db, "bookings"), where("classId", "==", classId)));
@@ -486,7 +484,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
     onRefresh();
   };
 
-  // Logique B2B
   const handleAddProClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProClient.name || !newProClient.address) return alert("Le nom et l'adresse sont obligatoires.");
@@ -523,7 +520,7 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
 
     if (action === 'TO_FACTURE') {
       if(!confirm("Transformer ce Devis en Facture officielle ? (Ceci l'enverra dans la comptabilité)")) return;
-      updates = { status: 'FACTURE', date: new Date().toISOString() }; // Met à jour la date au moment de la facturation
+      updates = { status: 'FACTURE', date: new Date().toISOString() }; 
     } 
     else if (action === 'TOGGLE_PAYMENT') {
       updates = { paymentStatus: invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID' };
@@ -536,7 +533,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
     const updatedInvoice = { ...invoice, ...updates };
     setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i));
 
-    // Si c'est une facture (ou qu'elle le devient), on synchronise avec Google Sheets (Onglet Presta)
     if (updatedInvoice.status === 'FACTURE') {
       syncToSheet({
         type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName,
@@ -559,7 +555,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
 
       {viewMode === 'B2B' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
               <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3>
@@ -617,7 +612,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
             </div>
           </div>
 
-          {/* Liste des Devis / Factures */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
             <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3>
             <div className="space-y-4">
@@ -644,7 +638,6 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
                       </div>
                     </div>
 
-                    {/* Actions selon statut */}
                     {inv.status === 'DEVIS' ? (
                       <button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition-colors">
                         Passer en Facturation
@@ -737,9 +730,7 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
   );
 };
 
-
-// --- RESTE DU CODE (COMPOSANTS COURS, FORMULAIRES ET APP) ---
-
+// --- MODALES (Suite) ---
 const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -930,7 +921,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
-          <a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
+          <a href={`http://googleusercontent.com/maps.google.com/4{encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
             <MapPin size={16}/> {info.location}
           </a>
         </div>
@@ -1040,6 +1031,7 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
+// --- APP & REGLAGES (Suite identique) ---
 const AdminSettingsTab = ({ locations, templates, globalSettings }: { locations: StudioLocation[], templates: ClassTemplate[], globalSettings: GlobalSettings }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
@@ -1134,6 +1126,130 @@ const AdminSettingsTab = ({ locations, templates, globalSettings }: { locations:
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// --- 3. MODALES TRANSVERSES ---
+
+const PaymentInfoModal = ({ isOpen, onClose }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
+        <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
+        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
+          <div>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PayPal :</span>
+            <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
+          </div>
+          <hr className="border-gray-200"/>
+          <div>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
+            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
+          </div>
+        </div>
+        <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
+        </div>
+        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
+      </div>
+    </div>
+  );
+};
+
+const BookingSuccessModal = ({ isOpen, onClose }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
+        <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
+        <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
+        <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
+          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
+          <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
+          <ul className="text-sm text-amber-800 space-y-2 mb-5 list-disc pl-5 font-medium">
+            <li>Short court + brassière <span className="font-normal opacity-80">(la peau doit accrocher !)</span></li>
+            <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
+            <li>Gourde d'eau</li>
+          </ul>
+          <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
+          <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
+            <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
+          </ul>
+        </div>
+        <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
+      </div>
+    </div>
+  );
+};
+
+const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
+      <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3>
+        <div className="space-y-3">
+          <button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-400'}`}>
+            <div className="flex items-center gap-3"><Zap size={20}/> <span className="font-bold">1 Crédit</span></div>
+            <span className="text-xs">Solde: {userCredits}</span>
+          </button>
+          <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
+          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button>
+        </div>
+        <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
+      </div>
+    </div>
+  );
+};
+
+const UserProfileForm = ({ user, onClose }: any) => {
+  const [formData, setFormData] = useState({
+    street: user.street || '', zipCode: user.zipCode || '', city: user.city || '',
+    phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || ''
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault(); setSaving(true);
+    try {
+      await updateDoc(doc(db, "users", user.id), formData);
+      await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, ...formData });
+      alert("Profil enregistré ! ✅"); onClose();
+    } catch (e) { alert("Erreur sauvegarde"); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl h-[85vh] overflow-y-auto">
+        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2"><User className="text-amber-600"/> Mon Profil</h2>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500"><p><strong>{user.displayName}</strong></p><p>{user.email}</p></div>
+          <div className="space-y-3">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2"><Phone size={16}/> Coordonnées</h3>
+            <input placeholder="Téléphone" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 border rounded-xl" />
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 mt-4"><Home size={16}/> Adresse</h3>
+            <input placeholder="Numéro et Rue" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl" />
+            <div className="flex gap-2">
+              <input placeholder="Code Postal" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl" />
+              <input placeholder="Ville" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl" />
+            </div>
+          </div>
+          <div className="space-y-3 mt-4 pt-4 border-t">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Urgence</h3>
+            <input placeholder="Nom contact urgence" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl" />
+            <input placeholder="Tél contact urgence" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl" />
+          </div>
+          <button type="submit" disabled={saving} className="w-full py-3 mt-6 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-xl shadow-lg hover:from-amber-600 hover:to-amber-700">{saving ? '...' : 'Enregistrer'}</button>
+          <button type="button" onClick={onClose} className="w-full py-3 text-gray-500 font-bold">Annuler</button>
+        </form>
       </div>
     </div>
   );
