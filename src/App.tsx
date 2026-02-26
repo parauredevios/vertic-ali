@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
-  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map, FileText, Download, FileCheck
+  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map, FileText, Download, FileCheck,
+  LayoutDashboard, BellRing, TrendingUp, Briefcase, FileSignature
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -21,6 +22,7 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVW
 // --- 1. MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
 interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; }
+interface GlobalSettings { reminderDays: number; }
 
 interface DanceClass {
   id: string; title: string; description?: string; price: string;
@@ -41,16 +43,23 @@ interface BookingInfo {
   paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
 }
 
+// NOUVEAU: Types B2B
+interface ProClient { id: string; name: string; address: string; siret?: string; }
+interface B2BInvoice {
+  id: string; clientId: string; clientName: string; date: string;
+  desc: string; qty: number; price: number; total: number;
+  status: 'DEVIS' | 'FACTURE'; paymentStatus: 'PENDING' | 'PAID';
+  paymentMethod: 'ESPECE' | 'VIREMENT_RIB' | 'WERO_PAYPAL';
+}
+
 type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- 2. FONCTION SYNC GOOGLE SHEETS ---
 const syncToSheet = async (payload: any) => {
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
-    const enrichedPayload = {
-      ...payload,
-      sheetName: payload.type === 'BOOKING' ? (payload.paymentStatus === 'PAID' ? 'Payer' : 'NON PAYÉ') : 'Defaut'
-    };
+    const enrichedPayload = { ...payload };
+    if (payload.type === 'BOOKING') enrichedPayload.sheetName = payload.paymentStatus === 'PAID' ? 'Payer' : 'NON PAYÉ';
     await fetch(GOOGLE_SCRIPT_URL, {
       method: "POST", mode: "no-cors", 
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(enrichedPayload)
@@ -60,7 +69,7 @@ const syncToSheet = async (payload: any) => {
 
 const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
-// --- FONCTION GENERATION PDF (FACTURE AU FORMAT DE LA CHEF) ---
+// --- FONCTIONS GENERATION PDF ---
 const getBase64ImageFromUrl = async (imageUrl: string) => {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
@@ -70,139 +79,117 @@ const getBase64ImageFromUrl = async (imageUrl: string) => {
       canvas.width = img.width;
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      } else reject('Canvas error');
+      if (ctx) { ctx.drawImage(img, 0, 0); resolve(canvas.toDataURL('image/png')); } else reject('Canvas error');
     };
     img.onerror = reject;
     img.src = imageUrl;
   });
 };
 
-const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: DanceClass) => {
-  const doc = new jsPDF();
-  const dateStr = new Date().toLocaleDateString('fr-FR');
-  const invNumber = `FAC-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${booking.userId.slice(0,4).toUpperCase()}`;
-
-  // 1. Essayer de charger le logo
+const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string, dateStr: string, clientName: string, clientAddress: string, clientSiret?: string) => {
   try {
     const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-    doc.addImage(logoBase64, 'PNG', 15, 15, 35, 35); // Logo en haut à gauche
+    doc.addImage(logoBase64, 'PNG', 15, 15, 35, 35);
   } catch (e) {
-    // Si pas de logo, on écrit juste le nom
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("Vertic'Ali", 15, 25);
+    doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.text("Vertic'Ali", 15, 25);
   }
 
-  // 2. En-tête droit (FACTURE)
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
-  doc.setTextColor(212, 175, 55); // Doré Vertic'Ali
-  doc.text("FACTURE", 150, 25);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(212, 175, 55); 
+  doc.text(typeDoc, 150, 25);
   
-  doc.setTextColor(0, 0, 0); // Noir
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("N° facture", 150, 35);
-  doc.setFont("helvetica", "normal");
-  doc.text(invNumber, 150, 40);
-  
-  doc.setFont("helvetica", "bold");
-  doc.text("Date facture", 150, 50);
-  doc.setFont("helvetica", "normal");
-  doc.text(dateStr, 150, 55);
+  doc.setTextColor(0, 0, 0); doc.setFontSize(10); doc.setFont("helvetica", "bold");
+  doc.text(`N° ${typeDoc.toLowerCase()}`, 150, 35); doc.setFont("helvetica", "normal"); doc.text(invNumber, 150, 40);
+  doc.setFont("helvetica", "bold"); doc.text("Date", 150, 50); doc.setFont("helvetica", "normal"); doc.text(dateStr, 150, 55);
 
-  // 3. Infos Client
-  doc.setFont("helvetica", "bold");
-  doc.text("Facturé à :", 15, 60);
-  doc.setFont("helvetica", "normal");
-  const clientName = booking.userName.replace(" (Manuel)", "");
+  doc.setFont("helvetica", "bold"); doc.text("Facturé à :", 15, 60); doc.setFont("helvetica", "normal");
   doc.text(clientName, 15, 65);
-  if (studentProfile?.street) {
-    doc.text(studentProfile.street, 15, 70);
-    doc.text(`${studentProfile.zipCode || ''} ${studentProfile.city || ''}`, 15, 75);
+  if (clientAddress) {
+    const splitAddress = doc.splitTextToSize(clientAddress, 80);
+    doc.text(splitAddress, 15, 70);
   } else {
     doc.text("Adresse non renseignée", 15, 70);
   }
+  if (clientSiret) {
+    doc.text(`N° SIRET : ${clientSiret}`, 15, 85);
+  }
 
-  // 4. Tableau Entêtes
-  doc.setFillColor(212, 175, 55); // Doré
-  doc.rect(15, 90, 180, 8, 'F');
-  doc.setTextColor(255, 255, 255); // Texte Blanc
+  doc.setFillColor(212, 175, 55); doc.rect(15, 95, 180, 8, 'F');
+  doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold");
+  doc.text("Description", 20, 100.5); doc.text("Qté", 110, 100.5); doc.text("Prix unitaire", 130, 100.5);
+  doc.text("TVA (%)", 155, 100.5); doc.text("Montant HT", 175, 100.5);
+  doc.setTextColor(0, 0, 0); 
+};
+
+const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
+  doc.setDrawColor(200); doc.line(15, 130, 195, 130);
   doc.setFont("helvetica", "bold");
-  doc.text("Description", 20, 95.5);
-  doc.text("Qté", 110, 95.5);
-  doc.text("Prix unitaire", 130, 95.5);
-  doc.text("TVA (%)", 155, 95.5);
-  doc.text("Montant HT", 175, 95.5);
-
-  // 5. Ligne de la facture
-  doc.setTextColor(0, 0, 0); // Texte Noir
+  doc.text("Total HT", 140, 140); doc.text("TVA", 140, 147); doc.text("Total TTC", 140, 157);
   doc.setFont("helvetica", "normal");
-  
-  // Formatage propre du prix
-  let rawPrice = classInfo.price || '0';
-  rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim();
-  if (isNaN(Number(rawPrice))) rawPrice = "0"; // Sécurité
-  const priceVal = `${rawPrice},00 €`;
-  
-  doc.text(classInfo.title, 20, 105);
-  doc.setFontSize(8);
-  doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 110);
-  
-  doc.setFontSize(10);
-  doc.text("1", 112, 105);
-  doc.text(priceVal, 130, 105);
-  doc.text("0", 160, 105);
-  doc.text(priceVal, 175, 105);
-  
-  // Ligne de séparation
-  doc.setDrawColor(200);
-  doc.line(15, 115, 195, 115);
+  doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147);
+  doc.setFont("helvetica", "bold"); doc.setTextColor(212, 175, 55); doc.text(totalStr, 175, 157);
 
-  // 6. Totaux
-  doc.setFont("helvetica", "bold");
-  doc.text("Total HT", 140, 125);
-  doc.text("TVA", 140, 132);
-  doc.text("Total TTC", 140, 142);
-  
-  doc.setFont("helvetica", "normal");
-  doc.text(priceVal, 175, 125);
-  doc.text("0,00 €", 175, 132);
-  
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(212, 175, 55);
-  doc.text(priceVal, 175, 142);
-
-  // 7. Mentions Légales (Bas de page)
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(80);
+  doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
   const footerLines = [
     "TVA non applicable selon l'article 293B du code général des impôts.",
     "Pas d'escompte accordé pour paiement anticipé.",
     "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.",
     "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.",
-    "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL",
-    "",
+    "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL", "",
     "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle",
     "18 rue Maurice Domon, Appt C22, 80000 AMIENS",
-    "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com",
-    "SIRET: 94819885800029"
+    "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com", "SIRET: 94819885800029"
   ];
-  
   let y = 230;
-  footerLines.forEach(line => {
-    doc.text(line, 105, y, { align: "center" });
-    y += 4.5;
-  });
+  footerLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4.5; });
+};
 
+// Facture B2C (Élève)
+const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: DanceClass) => {
+  const doc = new jsPDF();
+  const dateStr = new Date().toLocaleDateString('fr-FR');
+  const invNumber = `FAC-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${booking.userId.slice(0,4).toUpperCase()}`;
+  const clientName = booking.userName.replace(" (Manuel)", "");
+  const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
+  
+  await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
+  
+  let rawPrice = classInfo.price || '0';
+  rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim();
+  if (isNaN(Number(rawPrice))) rawPrice = "0"; 
+  const priceVal = `${rawPrice},00 €`;
+  
+  doc.setFont("helvetica", "normal"); doc.text(classInfo.title, 20, 110); doc.setFontSize(8);
+  doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115);
+  doc.setFontSize(10);
+  doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
+  
+  renderInvoiceFooter(doc, priceVal);
   doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
 };
 
-// --- 3. MODALES ---
+// Facture B2B (Professionnel)
+const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
+  const doc = new jsPDF();
+  const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
+  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
+  const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC';
+  const invNumber = `${prefix}-PRO-${new Date(invoice.date).getFullYear()}${String(new Date(invoice.date).getMonth()+1).padStart(2,'0')}-${invoice.id.slice(0,4).toUpperCase()}`;
+  
+  await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
+  
+  const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`;
+  const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
+  
+  doc.setFont("helvetica", "normal");
+  const splitDesc = doc.splitTextToSize(invoice.desc, 85);
+  doc.text(splitDesc, 20, 110);
+  doc.text(invoice.qty.toString(), 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(totalVal, 175, 110);
+  
+  renderInvoiceFooter(doc, totalVal);
+  doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'')}.pdf`);
+};
+
+// --- 3. MODALES TRANSVERSES ---
 
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
   if (!isOpen) return null;
@@ -211,10 +198,9 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3>
         <p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
-
         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4">
           <div>
-            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> PayPal - Wero :</span>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PaypPal :</span>
             <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
           </div>
           <hr className="border-gray-200"/>
@@ -223,12 +209,10 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
             <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
           </div>
         </div>
-
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom Prénom + date du cours</span></p>
+          <p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p>
         </div>
-
         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
       </div>
     </div>
@@ -243,7 +227,6 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div>
         <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
         <p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p>
-
         <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4>
           <p className="text-sm text-amber-800 mb-3">Pour ce cours, tu auras besoin des éléments suivants :</p>
@@ -252,14 +235,12 @@ const BookingSuccessModal = ({ isOpen, onClose }: any) => {
             <li>Tapis de yoga <span className="font-normal opacity-80">(Si tu n'en as pas, merci de prévenir)</span></li>
             <li>Gourde d'eau</li>
           </ul>
-
           <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4>
           <ul className="text-sm text-amber-800 space-y-2 list-none font-medium">
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers avant le cours.</li>
             <li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps le jour même, tu risques de glisser !</li>
           </ul>
         </div>
-
         <button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris !</button>
       </div>
     </div>
@@ -278,7 +259,7 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
             <span className="text-xs">Solde: {userCredits}</span>
           </button>
           <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
-          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">PayPal / Wero</span></button>
+          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button>
         </div>
         <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
       </div>
@@ -332,118 +313,436 @@ const UserProfileForm = ({ user, onClose }: any) => {
   );
 };
 
-// --- ONGLET FACTURES ADMIN (AVEC ARCHIVES) ---
+// --- TABLEAU DE BORD ADMIN ---
+const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
+  const [stats, setStats] = useState({ caMonthB2C: 0, caMonthB2B: 0, pendingCount: 0 });
+  const [reminders, setReminders] = useState<any[]>([]); // Mix de BookingInfo et B2BInvoice
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      
+      let caB2C = 0; let caB2B = 0;
+      let lateItems: any[] = [];
+
+      // 1. Récupération des cours B2C
+      const snapB2C = await getDocs(query(collection(db, "bookings")));
+      snapB2C.docs.forEach(d => {
+        const b = { id: d.id, ...d.data() } as BookingInfo;
+        const bDate = new Date(b.date);
+        
+        if (b.paymentStatus === 'PAID' && bDate >= firstDayOfMonth) {
+          let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim());
+          if (!isNaN(priceNum)) caB2C += priceNum;
+        }
+
+        if (b.paymentStatus === 'PENDING') {
+          const diffTime = Math.abs(now.getTime() - bDate.getTime());
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+          if (diffDays >= reminderDays && bDate < now) {
+            lateItems.push({
+              id: b.id, name: b.userName.replace(' (Manuel)', ''),
+              desc: `${b.classTitle} du ${bDate.toLocaleDateString('fr-FR')}`,
+              price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: bDate
+            });
+          }
+        }
+      });
+
+      // 2. Récupération des Prestations B2B
+      const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
+      snapB2B.docs.forEach(d => {
+        const b = { id: d.id, ...d.data() } as B2BInvoice;
+        const bDate = new Date(b.date);
+        
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PAID' && bDate >= firstDayOfMonth) {
+          caB2B += b.total;
+        }
+
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') {
+          const diffTime = Math.abs(now.getTime() - bDate.getTime());
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+          if (diffDays >= reminderDays && bDate < now) {
+            lateItems.push({
+              id: b.id, name: b.clientName,
+              desc: `Prestation PRO : ${b.desc} (${bDate.toLocaleDateString('fr-FR')})`,
+              price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: bDate
+            });
+          }
+        }
+      });
+
+      setStats({ caMonthB2C: caB2C, caMonthB2B: caB2B, pendingCount: lateItems.length });
+      setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime()));
+      setLoading(false);
+    };
+    fetchDashboardData();
+  }, [reminderDays]);
+
+  if (loading) return <div className="text-center p-10 text-gray-500"><Loader2 className="animate-spin inline mr-2"/> Chargement des statistiques...</div>;
+
+  return (
+    <div className="space-y-8 text-left">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-6">
+          <div className="p-4 bg-green-50 text-green-600 rounded-xl"><TrendingUp size={32}/></div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">CA Élèves (Mois)</p>
+            <p className="text-2xl font-black text-gray-800">{stats.caMonthB2C} €</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-6">
+          <div className="p-4 bg-indigo-50 text-indigo-600 rounded-xl"><Briefcase size={32}/></div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">CA Presta PRO (Mois)</p>
+            <p className="text-2xl font-black text-gray-800">{stats.caMonthB2B} €</p>
+          </div>
+        </div>
+        <div className="bg-gray-800 p-6 rounded-2xl shadow-md border border-gray-700 flex items-center gap-6">
+          <div className="p-4 bg-amber-500 text-gray-900 rounded-xl"><Wallet size={32}/></div>
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">CA TOTAL (Mois)</p>
+            <p className="text-2xl font-black text-white">{stats.caMonthB2C + stats.caMonthB2B} €</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
+          <AlertTriangle className="text-orange-500"/>
+          <h3 className="font-bold text-gray-800 text-lg">Paiements en retard (Plus de {reminderDays} jours)</h3>
+        </div>
+        <div className="p-5">
+          {reminders.length === 0 ? (
+            <p className="text-gray-500 text-sm">Aucun paiement en retard. Bravo !</p>
+          ) : (
+            <div className="space-y-3">
+              {reminders.map(r => (
+                <div key={r.id} className="flex justify-between items-center bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${r.type === 'PRO' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{r.type}</span>
+                      <p className="font-bold text-gray-800">{r.name}</p>
+                    </div>
+                    <p className="text-xs text-gray-500">{r.desc}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-red-600">{r.price}</p>
+                    <p className="text-xs text-gray-400">Via {r.method}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- ONGLET FACTURES ADMIN (B2C + B2B) ---
 const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[], onRefresh: () => void }) => {
-  const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED'>('PENDING');
+  const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'B2B'>('PENDING');
   const [expandedClass, setExpandedClass] = useState<string | null>(null);
   const [classBookings, setClassBookings] = useState<BookingInfo[]>([]);
   const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
+  
+  // States B2B
+  const [proClients, setProClients] = useState<ProClient[]>([]);
+  const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
+  const [newProClient, setNewProClient] = useState<Partial<ProClient>>({});
+  const [b2bInvoiceData, setB2bInvoiceData] = useState({ clientId: '', desc: '', qty: 1, price: 0 });
 
   const classesToDisplay = pastClasses.filter(c => viewMode === 'PENDING' ? !c.invoiceArchived : c.invoiceArchived);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      const snap = await getDocs(collection(db, "users"));
-      const usersMap: any = {};
-      snap.docs.forEach(d => { usersMap[d.id] = { id: d.id, ...d.data() }; });
+    const fetchAll = async () => {
+      const uSnap = await getDocs(collection(db, "users"));
+      const usersMap: any = {}; uSnap.docs.forEach(d => { usersMap[d.id] = { id: d.id, ...d.data() }; });
       setUsersInfo(usersMap);
-    };
-    fetchUsers();
-  }, []);
 
+      const pSnap = await getDocs(collection(db, "pro_clients"));
+      setProClients(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient)));
+
+      const iSnap = await getDocs(query(collection(db, "b2b_invoices"), orderBy("date", "desc")));
+      setB2bInvoices(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)));
+    };
+    fetchAll();
+  }, [viewMode]);
+
+  // Logique B2C
   const loadBookings = async (classId: string) => {
     if (expandedClass === classId) { setExpandedClass(null); return; }
     const snap = await getDocs(query(collection(db, "bookings"), where("classId", "==", classId)));
     setClassBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)));
     setExpandedClass(classId);
   };
-
-  const generateAll = (classInfo: DanceClass) => {
-    classBookings.forEach(b => {
-      const u = usersInfo[b.userId] || null;
-      generateInvoicePDF(b, u, classInfo);
-    });
-  };
-
+  const generateAll = (classInfo: DanceClass) => { classBookings.forEach(b => generateInvoicePDF(b, usersInfo[b.userId] || null, classInfo)); };
   const toggleArchiveStatus = async (classId: string, currentStatus: boolean | undefined) => {
-    const msg = currentStatus ? "Désarchiver et remettre dans 'À traiter' ?" : "Archiver ce cours ? Il n'apparaîtra plus dans la liste 'À traiter'.";
-    if(!confirm(msg)) return;
+    if(!confirm(currentStatus ? "Désarchiver et remettre dans 'À traiter' ?" : "Archiver ce cours ?")) return;
     await updateDoc(doc(db, "classes", classId), { invoiceArchived: !currentStatus });
     onRefresh();
   };
 
+  // Logique B2B
+  const handleAddProClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProClient.name || !newProClient.address) return alert("Le nom et l'adresse sont obligatoires.");
+    await addDoc(collection(db, "pro_clients"), newProClient);
+    setNewProClient({ name: '', address: '', siret: '' });
+    const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient)));
+  };
+  const handleDeleteProClient = async (id: string) => {
+    if (!confirm("Supprimer ce client pro de l'annuaire ?")) return;
+    await deleteDoc(doc(db, "pro_clients", id));
+    setProClients(proClients.filter(c => c.id !== id));
+  };
+
+  const handleCreateDevis = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const client = proClients.find(c => c.id === b2bInvoiceData.clientId);
+    if (!client) return alert("Sélectionnez un client valide.");
+    if (!b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Remplissez la description, quantité et prix.");
+    
+    const newInv: Omit<B2BInvoice, 'id'> = {
+      clientId: client.id, clientName: client.name, date: new Date().toISOString(),
+      desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total: b2bInvoiceData.qty * b2bInvoiceData.price,
+      status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB'
+    };
+    
+    const docRef = await addDoc(collection(db, "b2b_invoices"), newInv);
+    setB2bInvoices([{ id: docRef.id, ...newInv }, ...b2bInvoices]);
+    setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); 
+  };
+
+  const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => {
+    const ref = doc(db, "b2b_invoices", invoice.id);
+    let updates: any = {};
+
+    if (action === 'TO_FACTURE') {
+      if(!confirm("Transformer ce Devis en Facture officielle ? (Ceci l'enverra dans la comptabilité)")) return;
+      updates = { status: 'FACTURE', date: new Date().toISOString() }; // Met à jour la date au moment de la facturation
+    } 
+    else if (action === 'TOGGLE_PAYMENT') {
+      updates = { paymentStatus: invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID' };
+    }
+    else if (action === 'CHANGE_METHOD' && newVal) {
+      updates = { paymentMethod: newVal };
+    }
+
+    await updateDoc(ref, updates);
+    const updatedInvoice = { ...invoice, ...updates };
+    setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i));
+
+    // Si c'est une facture (ou qu'elle le devient), on synchronise avec Google Sheets (Onglet Presta)
+    if (updatedInvoice.status === 'FACTURE') {
+      syncToSheet({
+        type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName,
+        date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc,
+        qty: updatedInvoice.qty, price: updatedInvoice.price, total: updatedInvoice.total,
+        paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod
+      });
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-left">
       <div className="flex gap-2 p-1 bg-gray-200 rounded-xl w-fit">
-        <button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>À traiter</button>
-        <button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Archives</button>
+        <button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Élèves (À traiter)</button>
+        <button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Élèves (Archives)</button>
+        <button onClick={() => setViewMode('B2B')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors flex items-center gap-1 ${viewMode === 'B2B' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          <Briefcase size={14}/> Prestations PRO
+        </button>
       </div>
 
-      {classesToDisplay.length === 0 ? (
-        <div className="bg-white p-10 rounded-2xl shadow-sm text-center text-gray-500">
-          {viewMode === 'PENDING' ? "Tous les cours passés ont été archivés. Aucune facture en attente !" : "Aucune archive pour le moment."}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {classesToDisplay.map(c => (
-            <div key={c.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden text-left">
-              <div className="p-4 bg-gray-50 flex justify-between items-center cursor-pointer" onClick={() => loadBookings(c.id)}>
-                <div>
-                  <h3 className="font-bold text-gray-800 text-lg">{c.title}</h3>
-                  <p className="text-sm text-gray-500">{c.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})} à {c.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-sm font-bold bg-white px-3 py-1 rounded-lg border border-gray-200 shadow-sm"><Users size={14} className="inline mr-1"/> {c.attendeesCount}</span>
-                  {expandedClass === c.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}
-                </div>
-              </div>
-              
-              {expandedClass === c.id && (
-                <div className="p-5 border-t border-gray-200">
-                  <div className="flex justify-between items-center mb-4">
-                    <button onClick={() => generateAll(c)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors">
-                      <Download size={16}/> Tout télécharger
-                    </button>
-                    <button onClick={() => toggleArchiveStatus(c.id, c.invoiceArchived)} className="text-gray-500 hover:text-indigo-600 font-bold text-sm flex items-center gap-1 transition-colors">
-                      {c.invoiceArchived ? <><FileCheck size={16}/> Désarchiver</> : <><Archive size={16}/> Archiver le cours</>}
-                    </button>
-                  </div>
-
-                  {classBookings.length === 0 ? <p className="text-sm text-gray-400">Aucun élève inscrit.</p> : (
-                    <div className="space-y-2">
-                      {classBookings.map(b => {
-                        const u = usersInfo[b.userId];
-                        return (
-                          <div key={b.id} className="flex justify-between items-center bg-white border border-gray-100 p-3 rounded-xl hover:shadow-sm transition-shadow">
-                            <div>
-                              <p className="font-bold text-gray-800 text-sm">{b.userName.replace(' (Manuel)', '')}</p>
-                              <p className="text-xs text-gray-500">{u?.street ? `${u.city}` : 'Adresse manquante'} • Payé via {b.paymentMethod}</p>
-                            </div>
-                            <button onClick={() => generateInvoicePDF(b, u || null, c)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-2 rounded-lg transition-colors font-bold text-xs flex items-center gap-1">
-                              <FileText size={14}/> Générer
-                            </button>
-                          </div>
-                        );
-                      })}
+      {viewMode === 'B2B' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+              <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3>
+              <form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom de l'entreprise ou du Studio *" className="p-2 border rounded-lg text-sm outline-none"/>
+                <input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border rounded-lg text-sm outline-none"/>
+                <input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="N° SIRET (Optionnel)" className="p-2 border rounded-lg text-sm outline-none"/>
+                <button type="submit" className="bg-indigo-600 text-white font-bold py-2 rounded-lg hover:bg-indigo-700 mt-2">Ajouter à l'annuaire</button>
+              </form>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                {proClients.map(c => (
+                  <div key={c.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                    <div>
+                      <p className="font-bold text-sm text-gray-800">{c.name}</p>
+                      <p className="text-xs text-gray-500 truncate max-w-[200px]">{c.address}</p>
                     </div>
-                  )}
-                </div>
+                    <button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2 hover:bg-red-50 rounded-md"><Trash2 size={16}/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50">
+              <h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> Nouveau Devis PRO</h3>
+              {proClients.length === 0 ? (
+                <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-xl text-center border border-gray-200">Ajoutez d'abord un client pro dans l'annuaire.</p>
+              ) : (
+                <form onSubmit={handleCreateDevis} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Client Destinataire</label>
+                    <select value={b2bInvoiceData.clientId} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, clientId: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none focus:border-indigo-500 font-medium">
+                      <option value="">-- Sélectionner un client --</option>
+                      {proClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Description de la prestation</label>
+                    <textarea value={b2bInvoiceData.desc} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, desc: e.target.value})} placeholder="Ex: Show Pole Dance Soirée / Cours au taux horaire..." className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-indigo-500 min-h-[80px]"/>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Qté (Heures/Forfait)</label>
+                      <input type="number" min="0.5" step="0.5" value={b2bInvoiceData.qty} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, qty: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-indigo-500 text-center font-bold"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Prix unitaire</label>
+                      <input type="number" min="0" step="1" value={b2bInvoiceData.price} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, price: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-indigo-500 text-right font-bold"/>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold py-3 rounded-xl shadow-md mt-2 transition-all">
+                    Créer le Devis
+                  </button>
+                </form>
               )}
             </div>
-          ))}
+          </div>
+
+          {/* Liste des Devis / Factures */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+            <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3>
+            <div className="space-y-4">
+              {b2bInvoices.length === 0 ? <p className="text-sm text-gray-500 italic">Aucun devis ou facture généré.</p> : b2bInvoices.map(inv => {
+                const client = proClients.find(c => c.id === inv.clientId);
+                return (
+                  <div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${inv.status === 'DEVIS' ? 'bg-gray-200 text-gray-700' : 'bg-indigo-100 text-indigo-700'}`}>{inv.status}</span>
+                          <span className="font-bold text-gray-800">{inv.clientName}</span>
+                        </div>
+                        <p className="text-sm text-gray-600 font-medium">{inv.desc}</p>
+                        <p className="text-xs text-gray-400 mt-1">{new Date(inv.date).toLocaleDateString('fr-FR')} • Qté: {inv.qty} • {inv.price}€/u</p>
+                      </div>
+                      <div className="text-right flex flex-col items-end gap-2">
+                        <span className="text-lg font-black text-indigo-700">{inv.total} €</span>
+                        {client && (
+                          <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                            <Download size={12}/> {inv.status === 'DEVIS' ? 'Devis' : 'Facture'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions selon statut */}
+                    {inv.status === 'DEVIS' ? (
+                      <button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition-colors">
+                        Passer en Facturation
+                      </button>
+                    ) : (
+                      <div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1">
+                        <select 
+                          value={inv.paymentMethod} 
+                          onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)}
+                          className="flex-1 text-xs font-bold p-2 rounded-lg border border-gray-300 bg-white outline-none"
+                        >
+                          <option value="ESPECE">Espèces</option>
+                          <option value="VIREMENT_RIB">Virement</option>
+                          <option value="WERO_PAYPAL">Wero / Paypal</option>
+                        </select>
+                        <button 
+                          onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')}
+                          className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-colors ${
+                            inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          }`}
+                        >
+                          {inv.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
         </div>
+      ) : (
+        classesToDisplay.length === 0 ? (
+          <div className="bg-white p-10 rounded-2xl shadow-sm text-center text-gray-500">
+            {viewMode === 'PENDING' ? "Tous les cours passés ont été archivés. Aucune facture en attente !" : "Aucune archive pour le moment."}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {classesToDisplay.map(c => (
+              <div key={c.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden text-left">
+                <div className="p-4 bg-gray-50 flex justify-between items-center cursor-pointer" onClick={() => loadBookings(c.id)}>
+                  <div>
+                    <h3 className="font-bold text-gray-800 text-lg">{c.title}</h3>
+                    <p className="text-sm text-gray-500">{c.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})} à {c.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-bold bg-white px-3 py-1 rounded-lg border border-gray-200 shadow-sm"><Users size={14} className="inline mr-1"/> {c.attendeesCount}</span>
+                    {expandedClass === c.id ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}
+                  </div>
+                </div>
+                
+                {expandedClass === c.id && (
+                  <div className="p-5 border-t border-gray-200">
+                    <div className="flex justify-between items-center mb-4">
+                      <button onClick={() => generateAll(c)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors">
+                        <Download size={16}/> Tout télécharger
+                      </button>
+                      <button onClick={() => toggleArchiveStatus(c.id, c.invoiceArchived)} className="text-gray-500 hover:text-indigo-600 font-bold text-sm flex items-center gap-1 transition-colors">
+                        {c.invoiceArchived ? <><FileCheck size={16}/> Désarchiver</> : <><Archive size={16}/> Archiver le cours</>}
+                      </button>
+                    </div>
+
+                    {classBookings.length === 0 ? <p className="text-sm text-gray-400">Aucun élève inscrit.</p> : (
+                      <div className="space-y-2">
+                        {classBookings.map(b => {
+                          const u = usersInfo[b.userId];
+                          return (
+                            <div key={b.id} className="flex justify-between items-center bg-white border border-gray-100 p-3 rounded-xl hover:shadow-sm transition-shadow">
+                              <div>
+                                <p className="font-bold text-gray-800 text-sm">{b.userName.replace(' (Manuel)', '')}</p>
+                                <p className="text-xs text-gray-500">{u?.street ? `${u.city}` : 'Adresse manquante'} • Payé via {b.paymentMethod}</p>
+                              </div>
+                              <button onClick={() => generateInvoicePDF(b, u || null, c)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-2 rounded-lg transition-colors font-bold text-xs flex items-center gap-1">
+                                <FileText size={14}/> Générer PDF
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );
 };
 
 
-// --- SOUS-COMPOSANTS DES COURS ---
+// --- RESTE DU CODE (COMPOSANTS COURS, FORMULAIRES ET APP) ---
 
 const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  
   const [showAddManual, setShowAddManual] = useState(false);
   const [newManualName, setNewManualName] = useState('');
   const [newManualMethod, setNewManualMethod] = useState<PaymentMethod>('CASH');
@@ -631,7 +930,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
-          <a href={`http://googleusercontent.com/maps.google.com/4{encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
+          <a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
             <MapPin size={16}/> {info.location}
           </a>
         </div>
@@ -741,10 +1040,11 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-const AdminSettingsTab = ({ locations, templates }: { locations: StudioLocation[], templates: ClassTemplate[] }) => {
+const AdminSettingsTab = ({ locations, templates, globalSettings }: { locations: StudioLocation[], templates: ClassTemplate[], globalSettings: GlobalSettings }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
   const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '' });
+  const [remDays, setRemDays] = useState(globalSettings.reminderDays);
 
   const addLocation = async () => {
     if (!newLocName) return;
@@ -768,8 +1068,28 @@ const AdminSettingsTab = ({ locations, templates }: { locations: StudioLocation[
     await setDoc(doc(db, "settings", "general"), { templates: templates.filter(t => t.id !== id) }, { merge: true });
   };
 
+  const saveSettings = async () => {
+    await setDoc(doc(db, "settings", "general"), { reminderDays: remDays }, { merge: true });
+    alert("Paramètres enregistrés !");
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 lg:col-span-2">
+        <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Settings className="text-gray-500"/> Paramètres Généraux</h3>
+        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div>
+            <p className="font-bold text-gray-800">Délai des relances de paiement</p>
+            <p className="text-sm text-gray-500">Nombre de jours après le cours avant qu'un élève ou Pro "Non Payé" apparaisse dans le Tableau de Bord.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="number" value={remDays} onChange={e => setRemDays(Number(e.target.value))} className="p-2 border rounded-lg w-20 text-center font-bold"/>
+            <span className="text-sm font-bold text-gray-500 mr-2">Jours</span>
+            <button onClick={saveSettings} className="bg-gray-800 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-700">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Map className="text-indigo-500"/> Gestion des Lieux</h3>
         <div className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -819,17 +1139,17 @@ const AdminSettingsTab = ({ locations, templates }: { locations: StudioLocation[
   );
 };
 
-// --- 5. APPLICATION PRINCIPALE ---
 export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   
-  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_students' | 'admin_past' | 'admin_settings' | 'admin_invoices'>('planning');
+  const [activeTab, setActiveTab] = useState<'planning' | 'history' | 'admin_dashboard' | 'admin_students' | 'admin_past' | 'admin_settings' | 'admin_invoices'>('planning');
   const [classes, setClasses] = useState<DanceClass[]>([]);
   const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]);
   const [templates, setTemplates] = useState<ClassTemplate[]>([]);
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
   const [myBookings, setMyBookings] = useState<BookingInfo[]>([]);
   
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -875,13 +1195,10 @@ export default function App() {
         const data = docSnap.data();
         if (data.locations && data.locations.length > 0 && typeof data.locations[0] === 'string') {
           setLocations(data.locations.map((l: string, i: number) => ({ id: i.toString(), name: l, address: '' })));
-        } else {
-          setLocations(data.locations || []);
-        }
+        } else setLocations(data.locations || []);
         setTemplates(data.templates || []);
-      } else {
-        setDoc(doc(db, "settings", "general"), { locations: [], templates: [] });
-      }
+        setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3 });
+      } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], reminderDays: 3 });
     });
   }, []);
 
@@ -912,9 +1229,7 @@ export default function App() {
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classId);
         const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); 
-        const userDoc = await t.get(userRef);
-        
+        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
         const classData = classDoc.data(); const userData = userDoc.data();
         if (!classData || !userData) throw "Données introuvables";
 
@@ -939,8 +1254,7 @@ export default function App() {
         return { title: classData.title, dateStr, timeStr, loc: classData.location, cap: classData.maxCapacity, paymentStatus, method, price: classData.price || '' };
       }).then((d) => {
         syncToSheet({ type: 'BOOKING', classId, classTitle: d.title, date: d.dateStr, time: d.timeStr, location: d.loc, capacity: d.cap, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.price });
-        setBookingSuccessOpen(true); 
-        fetchAllData();
+        setBookingSuccessOpen(true); fetchAllData();
       });
     } catch (e) { alert("Erreur: " + e); }
     setProcessingId(null);
@@ -954,9 +1268,7 @@ export default function App() {
       const snap = await getDocs(q);
       let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
       if (!snap.empty) { 
-        bookingId = snap.docs[0].id; 
-        method = snap.docs[0].data().paymentMethod; 
-        pStatus = snap.docs[0].data().paymentStatus;
+        bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus;
       }
 
       await runTransaction(db, async (t) => {
@@ -977,8 +1289,7 @@ export default function App() {
          syncToSheet({ 
            type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, 
            date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), 
-           location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '',
-           paymentStatus: pStatus 
+           location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus 
          });
       }
       alert("Réservation annulée !"); fetchAllData();
@@ -1005,7 +1316,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans pb-32 text-left w-full">
       <div className="w-full max-w-[1500px] mx-auto">
-        
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 py-4 border-b border-gray-200">
           <div className="flex items-center gap-4">
              {authUser?.photoURL && <img src={authUser.photoURL} className="w-14 h-14 rounded-full border-2 border-amber-200 shadow-sm"/>}
@@ -1055,6 +1365,9 @@ export default function App() {
           {userProfile?.role === 'admin' && (
             <>
               <div className="w-px bg-gray-200 my-2 mx-2"></div>
+              <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-50'}`}>
+                <LayoutDashboard size={18}/> Tableau de Bord
+              </button>
               <button onClick={() => setActiveTab('admin_invoices')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>
                 <FileText size={18}/> Factures
               </button>
@@ -1107,6 +1420,10 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'admin_dashboard' && userProfile?.role === 'admin' && (
+          <AdminDashboardTab reminderDays={globalSettings.reminderDays} />
+        )}
+
         {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && (
           <AdminInvoicesTab pastClasses={pastClasses} onRefresh={fetchAllData} />
         )}
@@ -1127,7 +1444,7 @@ export default function App() {
         )}
 
         {activeTab === 'admin_settings' && userProfile?.role === 'admin' && (
-          <AdminSettingsTab locations={locations} templates={templates} />
+          <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} />
         )}
 
       </div>
