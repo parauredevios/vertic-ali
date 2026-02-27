@@ -41,6 +41,8 @@ interface BookingInfo {
   id: string; classId: string; userId: string; userName: string; classTitle: string;
   date: string; dateStr: string; timeStr: string; location: string; price: string;
   paymentMethod: 'CREDIT' | 'CASH' | 'WERO_RIB'; paymentStatus: 'PAID' | 'PENDING';
+  paidAt?: string; // NOUVEAU: Date exacte du paiement
+  updatedAt?: string; // NOUVEAU: Date de la dernière action
 }
 
 interface ProClient { id: string; name: string; address: string; siret?: string; }
@@ -49,6 +51,8 @@ interface B2BInvoice {
   desc: string; qty: number; price: number; total: number;
   status: 'DEVIS' | 'FACTURE'; paymentStatus: 'PENDING' | 'PAID';
   paymentMethod: 'ESPECE' | 'VIREMENT_RIB' | 'WERO_PAYPAL';
+  paidAt?: string; // NOUVEAU: Date exacte du paiement
+  updatedAt?: string;
 }
 
 type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
@@ -57,7 +61,8 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 const syncToSheet = async (payload: any) => {
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
-    const enrichedPayload = { ...payload };
+    const actionDate = new Date().toLocaleString('fr-FR');
+    const enrichedPayload = { actionDate, ...payload };
     if (payload.type === 'BOOKING') enrichedPayload.sheetName = payload.paymentStatus === 'PAID' ? 'Payer' : 'NON PAYÉ';
     await fetch(GOOGLE_SCRIPT_URL, {
       method: "POST", mode: "no-cors", 
@@ -92,14 +97,11 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   } catch (e) {
     doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.text("Vertic'Ali", 15, 25);
   }
-
   doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(212, 175, 55); 
   doc.text(typeDoc, 150, 25);
-  
   doc.setTextColor(0, 0, 0); doc.setFontSize(10); doc.setFont("helvetica", "bold");
   doc.text(`N° ${typeDoc.toLowerCase()}`, 150, 35); doc.setFont("helvetica", "normal"); doc.text(invNumber, 150, 40);
   doc.setFont("helvetica", "bold"); doc.text("Date", 150, 50); doc.setFont("helvetica", "normal"); doc.text(dateStr, 150, 55);
-
   doc.setFont("helvetica", "bold"); doc.text("Facturé à :", 15, 60); doc.setFont("helvetica", "normal");
   doc.text(clientName, 15, 65);
   if (clientAddress) {
@@ -111,7 +113,6 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   if (clientSiret) {
     doc.text(`N° SIRET : ${clientSiret}`, 15, 85);
   }
-
   doc.setFillColor(212, 175, 55); doc.rect(15, 95, 180, 8, 'F');
   doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold");
   doc.text("Description", 20, 100.5); doc.text("Qté", 110, 100.5); doc.text("Prix unitaire", 130, 100.5);
@@ -126,7 +127,6 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
   doc.setFont("helvetica", "normal");
   doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147);
   doc.setFont("helvetica", "bold"); doc.setTextColor(212, 175, 55); doc.text(totalStr, 175, 157);
-
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
   const footerLines = [
     "TVA non applicable selon l'article 293B du code général des impôts.",
@@ -148,19 +148,15 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   const invNumber = `FAC-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${booking.userId.slice(0,4).toUpperCase()}`;
   const clientName = booking.userName.replace(" (Manuel)", "");
   const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
-  
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
-  
   let rawPrice = classInfo.price || '0';
   rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim();
   if (isNaN(Number(rawPrice))) rawPrice = "0"; 
   const priceVal = `${rawPrice},00 €`;
-  
   doc.setFont("helvetica", "normal"); doc.text(classInfo.title, 20, 110); doc.setFontSize(8);
   doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115);
   doc.setFontSize(10);
   doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  
   renderInvoiceFooter(doc, priceVal);
   doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
 };
@@ -171,17 +167,13 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
   const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
   const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC';
   const invNumber = `${prefix}-PRO-${new Date(invoice.date).getFullYear()}${String(new Date(invoice.date).getMonth()+1).padStart(2,'0')}-${invoice.id.slice(0,4).toUpperCase()}`;
-  
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
-  
   const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`;
   const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
-  
   doc.setFont("helvetica", "normal");
   const splitDesc = doc.splitTextToSize(invoice.desc, 85);
   doc.text(splitDesc, 20, 110);
   doc.text(invoice.qty.toString(), 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(totalVal, 175, 110);
-  
   renderInvoiceFooter(doc, totalVal);
   doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'')}.pdf`);
 };
@@ -208,21 +200,22 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       const snapB2C = await getDocs(query(collection(db, "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo;
-        const bDate = new Date(b.date);
+        // B2C: On utilise la date exacte du paiement si dispo, sinon la date du cours
+        const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
         
-        if (b.paymentStatus === 'PAID' && bDate >= firstDayOfMonth) {
+        if (b.paymentStatus === 'PAID' && accDate >= firstDayOfMonth) {
           let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim());
           if (!isNaN(priceNum)) caB2C += priceNum;
         }
 
         if (b.paymentStatus === 'PENDING') {
-          const diffTime = Math.abs(now.getTime() - bDate.getTime());
+          const diffTime = Math.abs(now.getTime() - accDate.getTime());
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-          if (diffDays >= reminderDays && bDate < now) {
+          if (diffDays >= reminderDays && accDate < now) {
             lateItems.push({
               id: b.id, name: b.userName.replace(' (Manuel)', ''),
-              desc: `${b.classTitle} du ${bDate.toLocaleDateString('fr-FR')}`,
-              price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: bDate
+              desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`,
+              price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate
             });
           }
         }
@@ -231,20 +224,21 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice;
-        const bDate = new Date(b.date);
+        // B2B: Date de paiement, sinon date de la facture
+        const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
         
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PAID' && bDate >= firstDayOfMonth) {
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PAID' && accDate >= firstDayOfMonth) {
           caB2B += b.total;
         }
 
         if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') {
-          const diffTime = Math.abs(now.getTime() - bDate.getTime());
+          const diffTime = Math.abs(now.getTime() - accDate.getTime());
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-          if (diffDays >= reminderDays && bDate < now) {
+          if (diffDays >= reminderDays && accDate < now) {
             lateItems.push({
               id: b.id, name: b.clientName,
-              desc: `Prestation PRO : ${b.desc} (${bDate.toLocaleDateString('fr-FR')})`,
-              price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: bDate
+              desc: `Prestation PRO : ${b.desc} (${new Date(b.date).toLocaleDateString('fr-FR')})`,
+              price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate
             });
           }
         }
@@ -263,19 +257,18 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
     try {
       const endOfDay = new Date(end);
       endOfDay.setHours(23, 59, 59, 999);
-      
       let exportRows: any[] = [];
 
-      // 1. Récupération B2C (Élèves Payés)
+      // 1. Récupération B2C (Élèves Payés dans la période)
       const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID")));
       snapB2C.docs.forEach(d => {
         const b = d.data() as BookingInfo;
-        const bDate = new Date(b.date);
-        if (bDate >= start && bDate <= endOfDay) {
+        const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
+        if (accDate >= start && accDate <= endOfDay) {
           let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim());
-          if (!isNaN(priceNum) && priceNum > 0) { // Ne pas compter les prix mal formés ou à 0
+          if (!isNaN(priceNum) && priceNum > 0) {
             exportRows.push({
-              dateObj: bDate, dateStr: bDate.toLocaleDateString('fr-FR'),
+              dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}),
               type: 'B2C (Élève)', client: b.userName.replace(' (Manuel)', ''),
               desc: b.classTitle, method: b.paymentMethod, amount: priceNum
             });
@@ -283,39 +276,32 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
         }
       });
 
-      // 2. Récupération B2B (Pros Payés)
+      // 2. Récupération B2B (Pros Payés dans la période)
       const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID")));
       snapB2B.docs.forEach(d => {
         const b = d.data() as B2BInvoice;
-        const bDate = new Date(b.date);
-        if (bDate >= start && bDate <= endOfDay) {
+        const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
+        if (accDate >= start && accDate <= endOfDay) {
           exportRows.push({
-            dateObj: bDate, dateStr: bDate.toLocaleDateString('fr-FR'),
+            dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}),
             type: 'B2B (PRO)', client: b.clientName,
             desc: b.desc, method: b.paymentMethod, amount: b.total
           });
         }
       });
 
-      // Tri chronologique
       exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
-
-      // Construction du CSV avec le BOM UTF-8 (pour qu'Excel lise bien les accents français)
-      let csvContent = "Date;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n";
+      let csvContent = "Date de Paiement;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n";
       let totalAmount = 0;
       
       exportRows.forEach(r => {
-        // Remplacement des sauts de ligne et guillemets pour éviter de casser le CSV
         const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); 
         const safeClient = r.client.replace(/"/g, '""');
         csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`;
         totalAmount += r.amount;
       });
-      
-      // Ligne de Total à la fin
       csvContent += `;;;;TOTAL;${totalAmount}\n`;
 
-      // Création et téléchargement du fichier
       const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
@@ -326,9 +312,7 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       link.click();
       document.body.removeChild(link);
 
-    } catch (error) {
-      alert("Erreur lors de la création de l'export.");
-    }
+    } catch (error) { alert("Erreur lors de la création de l'export."); }
     setIsExporting(false);
   };
 
@@ -375,14 +359,14 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
         </div>
       </div>
 
-      {/* --- NOUVEAU : ENCART EXPORT URSSAF --- */}
+      {/* --- ENCART EXPORT URSSAF --- */}
       <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl"><FileSpreadsheet size={24}/></div>
             <div>
               <h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3>
-              <p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes (B2C et B2B) au format Excel CSV.</p>
+              <p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes (Basées sur les dates exactes de paiement).</p>
             </div>
           </div>
           <button 
@@ -503,8 +487,9 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
     if (!client) return alert("Sélectionnez un client valide.");
     if (!b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Remplissez la description, quantité et prix.");
     
+    const nowStr = new Date().toISOString();
     const newInv: Omit<B2BInvoice, 'id'> = {
-      clientId: client.id, clientName: client.name, date: new Date().toISOString(),
+      clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr,
       desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total: b2bInvoiceData.qty * b2bInvoiceData.price,
       status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB'
     };
@@ -517,16 +502,18 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => {
     const ref = doc(db, "b2b_invoices", invoice.id);
     let updates: any = {};
+    const nowStr = new Date().toISOString();
 
     if (action === 'TO_FACTURE') {
       if(!confirm("Transformer ce Devis en Facture officielle ? (Ceci l'enverra dans la comptabilité)")) return;
-      updates = { status: 'FACTURE', date: new Date().toISOString() }; 
+      updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; 
     } 
     else if (action === 'TOGGLE_PAYMENT') {
-      updates = { paymentStatus: invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID' };
+      const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID';
+      updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null };
     }
     else if (action === 'CHANGE_METHOD' && newVal) {
-      updates = { paymentMethod: newVal };
+      updates = { paymentMethod: newVal, updatedAt: nowStr };
     }
 
     await updateDoc(ref, updates);
@@ -651,7 +638,7 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
                         >
                           <option value="ESPECE">Espèces</option>
                           <option value="VIREMENT_RIB">Virement</option>
-                          <option value="WERO_PAYPAL">Wero / Paypal</option>
+                          <option value="WERO_PAYPAL">Wero - Paypal</option>
                         </select>
                         <button 
                           onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')}
@@ -730,7 +717,7 @@ const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[
   );
 };
 
-// --- MODALES (Suite) ---
+// --- SOUS-COMPOSANTS DES COURS ---
 const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
   const [bookings, setBookings] = useState<BookingInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -749,7 +736,12 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
 
   const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
-    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus });
+    const nowStr = new Date().toISOString();
+    await updateDoc(doc(db, "bookings", bookingId), { 
+      paymentStatus: newStatus,
+      updatedAt: nowStr,
+      paidAt: newStatus === 'PAID' ? nowStr : null
+    });
     syncToSheet({
       type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle,
       date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '',
@@ -775,12 +767,14 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
         const dateStr = classInfo.startAt.toLocaleDateString('fr-FR');
         const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
         const paymentStatus = newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING';
+        const nowStr = new Date().toISOString();
 
         t.set(doc(collection(db, "bookings")), { 
           classId: classInfo.id, userId: manualId, userName: newManualName + " (Manuel)",
           classTitle: classInfo.title, date: classInfo.startAt.toISOString(),
           dateStr, timeStr, location: classInfo.location, price: classInfo.price,
-          paymentMethod: newManualMethod, paymentStatus
+          paymentMethod: newManualMethod, paymentStatus,
+          updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null
         });
       });
 
@@ -838,7 +832,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
             <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left border border-gray-100">
               <div className="flex-1">
                 <span className="font-bold text-gray-700 block">{b.userName}</span>
-                <span className="text-xs text-gray-500">{b.paymentMethod}</span>
+                <span className="text-xs text-gray-500">{b.paymentMethod} {b.paidAt && `- Payé le ${new Date(b.paidAt).toLocaleDateString('fr-FR')}`}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button 
@@ -921,7 +915,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium">
           <span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span>
-          <a href={`http://googleusercontent.com/maps.google.com/4{encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
+          <a href={`http://googleusercontent.com/maps.google.com/5{encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noopener noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline transition-colors" title="Ouvrir le GPS">
             <MapPin size={16}/> {info.location}
           </a>
         </div>
@@ -1031,7 +1025,6 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-// --- APP & REGLAGES (Suite identique) ---
 const AdminSettingsTab = ({ locations, templates, globalSettings }: { locations: StudioLocation[], templates: ClassTemplate[], globalSettings: GlobalSettings }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
@@ -1131,8 +1124,7 @@ const AdminSettingsTab = ({ locations, templates, globalSettings }: { locations:
   );
 };
 
-// --- 3. MODALES TRANSVERSES ---
-
+// --- MODALES (Suite) ---
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
   if (!isOpen) return null;
   return (
@@ -1144,6 +1136,11 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
           <div>
             <span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero - PayPal :</span>
             <p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p>
+          </div>
+          <hr className="border-gray-200"/>
+          <div>
+            <span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span>
+            <p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p>
           </div>
         </div>
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100">
@@ -1196,7 +1193,7 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
             <span className="text-xs">Solde: {userCredits}</span>
           </button>
           <button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button>
-          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button>
+          <button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">PayPal - Wero</span></button>
         </div>
         <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold">Annuler</button>
       </div>
@@ -1355,12 +1352,13 @@ export default function App() {
         const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING';
         const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR');
         const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+        const nowStr = new Date().toISOString();
 
         t.set(doc(collection(db, "bookings")), { 
           classId, userId: userProfile.id, userName: userProfile.displayName,
           classTitle: classData.title, date: classData.startAt.toDate().toISOString(),
           dateStr, timeStr, location: classData.location, price: classData.price || '',
-          paymentMethod: method, paymentStatus
+          paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null
         });
         return { title: classData.title, dateStr, timeStr, loc: classData.location, cap: classData.maxCapacity, paymentStatus, method, price: classData.price || '' };
       }).then((d) => {
