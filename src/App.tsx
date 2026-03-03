@@ -346,7 +346,7 @@ const AdminBoutiqueTab = () => {
 };
 
 // --- ONGLET : FACTURES (FUSIONNÉ AVEC BOUTIQUE ET B2B) ---
-const AdminInvoicesTab = ({ pastClasses: DanceClass[]; onRefresh: () => Promise<void>; }) => {
+const AdminInvoicesTab = () => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
   
   // États B2C & Boutique
