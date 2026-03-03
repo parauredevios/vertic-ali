@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { 
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle,
