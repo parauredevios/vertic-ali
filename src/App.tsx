@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, ExternalLink,
+  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle,
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
-  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, FileCheck,
+  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download,
   LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
@@ -32,6 +32,7 @@ interface UserProfile {
   id: string; email: string; displayName: string; role: 'student' | 'admin';
   birthDate?: string; street?: string; zipCode?: string; city?: string; phone?: string; emergencyContact?: string; emergencyPhone?: string;
   hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string;
+  credits?: number;
   creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];
 }
 
@@ -344,7 +345,7 @@ const AdminBoutiqueTab = () => {
 };
 
 // --- ONGLET : FACTURES (FUSIONNÉ AVEC BOUTIQUE ET B2B) ---
-const AdminInvoicesTab = ({ pastClasses, onRefresh }: { pastClasses: DanceClass[], onRefresh: () => void }) => {
+const AdminInvoicesTab = () => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
   
   // États B2C & Boutique
@@ -523,7 +524,7 @@ const AdminStudentsTab = () => {
         <div className="space-y-2 overflow-y-auto flex-1 pr-2">
           {filteredUsers.length === 0 ? <p className="text-center text-sm text-gray-400 py-4">Aucun élève trouvé.</p> : filteredUsers.map(u => (
             <div key={u.id} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
-              <div className="flex justify-between items-center mb-1"><span className="font-bold text-sm text-gray-800">{u.displayName}</span>{!u.hasFilledForm && <AlertTriangle size={14} className="text-red-500" title="Profil incomplet" />}</div>
+              <div className="flex justify-between items-center mb-1"><span className="font-bold text-sm text-gray-800">{u.displayName}</span>{!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</div>
               <span className="text-xs text-gray-500 mb-2 truncate">{u.email}</span>
               <div className="flex gap-2 items-center">
                 <button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, false)}} className="w-6 h-6 bg-gray-200 rounded text-xs font-bold hover:bg-gray-300">-</button>
@@ -909,14 +910,7 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
     </div>
   );
 };
-const BookingSuccessModal = ({ isOpen, onClose }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden animate-in fade-in zoom-in duration-200"><div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-green-500"></div><h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3><p className="text-gray-600 mb-6 font-medium">Ta place est confirmée pour le cours.</p><div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100"><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel à prendre avec toi</h4><ul className="text-sm text-amber-800 space-y-2 mb-5 list-disc pl-5 font-medium"><li>Short court + brassière</li><li>Tapis de yoga (Si tu en as un)</li><li>Gourde d'eau</li></ul><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter :</h4><ul className="text-sm text-amber-800 space-y-2 list-none font-medium"><li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Retire tes bagues, bracelets et colliers.</li><li className="flex items-start gap-2"><XCircle size={16} className="text-red-500 shrink-0 mt-0.5"/> Ne mets pas de crème/huile sur le corps !</li></ul></div><button onClick={onClose} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-lg shadow-green-200">J'ai compris, à vite !</button></div>
-    </div>
-  );
-};
+
 const UserProfileForm = ({ user, onClose }: any) => {
   const isFirstTime = !user.hasFilledForm;
   const [formData, setFormData] = useState({ birthDate: user.birthDate || '', street: user.street || '', zipCode: user.zipCode || '', city: user.city || '', phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || '' });
