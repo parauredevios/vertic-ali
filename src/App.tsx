@@ -345,7 +345,7 @@ const AdminBoutiqueTab = () => {
 };
 
 // --- ONGLET : FACTURES (FUSIONNÉ AVEC BOUTIQUE ET B2B) ---
-const AdminInvoicesTab = () => {
+const AdminInvoicesTab = ({ pastClasses: DanceClass[]; onRefresh: () => Promise<void>; }) => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
   
   // États B2C & Boutique
@@ -1239,7 +1239,7 @@ export default function App() {
         )}
 
         {activeTab === 'admin_dashboard' && userProfile?.role === 'admin' && <AdminDashboardTab reminderDays={globalSettings.reminderDays} />}
-        {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && <AdminInvoicesTab pastClasses={pastClasses} onRefresh={fetchAllData} />}
+        {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && <AdminInvoicesTab />}
         {activeTab === 'admin_students' && userProfile?.role === 'admin' && <AdminStudentsTab />}
         {activeTab === 'admin_past' && userProfile?.role === 'admin' && (
           <div>
