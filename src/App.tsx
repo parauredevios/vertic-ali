@@ -95,24 +95,28 @@ const getBase64ImageFromUrl = async (imageUrl: string) => {
 
 const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string, dateStr: string, clientName: string, clientAddress: string, clientSiret?: string) => {
   try { const logoBase64 = await getBase64ImageFromUrl('/logo.png'); doc.addImage(logoBase64, 'PNG', 15, 15, 35, 35); } catch (e) { doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.text("Vertic'Ali", 15, 25); }
-  doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(144, 190, 109); doc.text(typeDoc, 150, 25); 
+  doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(236, 214, 120); doc.text(typeDoc, 150, 25); 
   doc.setTextColor(0, 0, 0); doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text(`N° ${typeDoc.toLowerCase()}`, 150, 35); doc.setFont("helvetica", "normal"); doc.text(invNumber, 150, 40);
   doc.setFont("helvetica", "bold"); doc.text("Date", 150, 50); doc.setFont("helvetica", "normal"); doc.text(dateStr, 150, 55);
   doc.setFont("helvetica", "bold"); doc.text("Facturé à :", 15, 60); doc.setFont("helvetica", "normal"); doc.text(clientName, 15, 65);
   if (clientAddress) { const splitAddress = doc.splitTextToSize(clientAddress, 80); doc.text(splitAddress, 15, 70); } else { doc.text("Adresse non renseignée", 15, 70); }
   if (clientSiret) { doc.text(`N° SIRET : ${clientSiret}`, 15, 85); }
-  doc.setFillColor(144, 190, 109); doc.rect(15, 95, 180, 8, 'F'); doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold");
+  doc.setFillColor(236, 214, 120); doc.rect(15, 95, 180, 8, 'F'); doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "bold");
   doc.text("Description", 20, 100.5); doc.text("Qté", 110, 100.5); doc.text("Prix unitaire", 130, 100.5); doc.text("TVA (%)", 155, 100.5); doc.text("Montant HT", 175, 100.5);
   doc.setTextColor(0, 0, 0); 
 };
 
 const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
   doc.setDrawColor(200); doc.line(15, 130, 195, 130); doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, 140); doc.text("TVA", 140, 147); doc.text("Total TTC", 140, 157);
-  doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147); doc.setFont("helvetica", "bold"); doc.setTextColor(144, 190, 109); doc.text(totalStr, 175, 157);
+  // Ici, le Total TTC est repassé en noir (0, 0, 0)
+  doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, 157);
+  
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
   const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.", "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL" ];
   let y = 240; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4.5; });
-  doc.setFillColor(144, 190, 109); doc.rect(0, 268, 210, 30, 'F'); doc.setTextColor(255, 255, 255);
+  
+  // Bandeau jaune (236, 214, 120) et texte en noir (0, 0, 0)
+  doc.setFillColor(236, 214, 120); doc.rect(0, 268, 210, 30, 'F'); doc.setTextColor(0, 0, 0);
   const greenLines = [ "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle", "18 rue Maurice Domon, Appt C22, 80000 AMIENS", "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com", "SIRET: 94819885800029" ];
   y = 275; greenLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 5; });
 };
@@ -875,14 +879,14 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
 const BoutiqueModal = ({ isOpen, onClose, user, packs }: { isOpen: boolean, onClose: () => void, user: UserProfile, packs: CreditPackTemplate[] }) => {
   if (!isOpen) return null; const activeCreds = getActiveCredits(user);
   const handleBuy = async (pack: CreditPackTemplate) => {
-    if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ?`)) return;
+    if (!window.confirm(`Commander "${pack.name}" pour ${pack.price}€ ?`)) return;
     try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement avec le motif 'Pack Credits + Ton Nom'."); onClose(); } catch (e) { alert("Erreur."); }
   };
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
         <h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>
-        {packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map(p => (<div key={p.id} className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Acheter</button></div></div>))}</div>)}
+        {packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map(p => (<div key={p.id} className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Commander</button></div></div>))}</div>)}
         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Fermer</button>
       </div>
     </div>
