@@ -1,10 +1,9 @@
-// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { 
-  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle,
+  Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
-  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download,
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database
+  Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -21,7 +20,7 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVW
 interface StudioLocation { id: string; name: string; address: string; }
 interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; }
 interface CreditPackTemplate { id: string; name: string; price: number; qty: number; validityDays: number; }
-interface GlobalSettings { reminderDays: number; }
+interface GlobalSettings { reminderDays: number; welcomeText?: string; welcomeImageUrl?: string; welcomeTextSize?: number; welcomeImageSize?: number; }
 
 interface DanceClass {
   id: string; title: string; description?: string; price: string;
@@ -286,34 +285,17 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
   );
 };
 
-// --- ONGLET : VENTES BOUTIQUE (COMPOSANT) ---
 const AdminBoutiqueTab = () => {
   const [purchases, setPurchases] = useState<CreditPurchase[]>([]);
-  
-  useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, "credit_purchases"), orderBy("date", "desc")), (snap) => {
-      setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)));
-    });
-    return () => unsub();
-  }, []);
-
+  useEffect(() => { const unsub = onSnapshot(query(collection(db, "credit_purchases"), orderBy("date", "desc")), (snap) => setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)))); return () => unsub(); }, []);
   const validatePurchase = async (p: CreditPurchase) => {
     if(!window.confirm(`Valider le paiement de ${p.price}€ et ajouter ${p.qty} crédits à ${p.userName} ?`)) return;
     try {
-      const userRef = doc(db, "users", p.userId); 
-      const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
-      if (userSnap.empty) return; 
-      
-      const userData = userSnap.docs[0].data() as UserProfile;
-      const nowStr = new Date().toISOString(); 
-      const expires = new Date(); 
-      expires.setDate(expires.getDate() + p.validityDays);
-      
-      await updateDoc(userRef, { 
-        creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] 
-      });
+      const userRef = doc(db, "users", p.userId); const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
+      if (userSnap.empty) return; const userData = userSnap.docs[0].data() as UserProfile;
+      const nowStr = new Date().toISOString(); const expires = new Date(); expires.setDate(expires.getDate() + p.validityDays);
+      await updateDoc(userRef, { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] });
       await updateDoc(doc(db, "credit_purchases", p.id), { status: 'PAID', paidAt: nowStr });
-      
       syncToSheet({ type: 'CREDIT_PURCHASE', id: p.id, packName: p.packName, date: new Date().toLocaleDateString('fr-FR'), price: p.price, studentName: p.userName, studentId: p.userId });
       alert("Crédits ajoutés avec succès !");
     } catch (e) { alert("Erreur."); }
@@ -321,47 +303,24 @@ const AdminBoutiqueTab = () => {
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 text-left">
-      <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
-        <ShoppingBag className="text-amber-500"/> Commandes de Crédits
-      </h3>
-      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande en attente ou historique.</p> : (
-        <div className="space-y-4">
-          {purchases.map(p => (
-            <div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}>
-              <div>
-                <p className="font-bold text-gray-800">
-                  {p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span>
-                </p>
-                <p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p>
-              </div>
-              {p.status === 'PENDING' ? (
-                <button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-colors shadow-sm">
-                  <CheckCircle size={16}/> Valider le paiement
-                </button>
-              ) : (
-                <span className="text-xs font-bold text-gray-500 bg-gray-200 px-3 py-1.5 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>
-              )}
-            </div>
-          ))}
-        </div>
+      <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><ShoppingBag className="text-amber-500"/> Commandes de Crédits</h3>
+      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (
+        <div className="space-y-4">{purchases.map(p => (<div key={p.id} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-gray-50"><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? <button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg font-bold text-sm flex gap-2"><CheckCircle size={16}/> Valider le paiement</button> : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>
       )}
     </div>
   );
 };
 
-// --- ONGLET : FACTURES (FUSIONNÉ AVEC BOUTIQUE ET B2B) ---
 const AdminInvoicesTab = () => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
-  
-  // États B2C & Boutique
   const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
   const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
   
-  // États B2B
   const [proClients, setProClients] = useState<ProClient[]>([]);
   const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
   const [newProClient, setNewProClient] = useState<Partial<ProClient>>({});
   const [editingProId, setEditingProId] = useState<string | null>(null);
+  
   const [b2bInvoiceData, setB2bInvoiceData] = useState({ clientId: '', desc: '', qty: 1, price: 0 });
   const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
 
@@ -374,15 +333,12 @@ const AdminInvoicesTab = () => {
     }; fetchAll();
   }, []);
 
-  // Tri intelligent des factures élèves (Rouge si passé et non payé)
   const pendingGroups: any = {}; const archivedGroups: any = {}; const now = new Date().getTime();
-  
   allBookings.forEach(b => {
-     if (b.paymentMethod === 'CREDIT') return; // Pas de facture pour les crédits
+     if (b.paymentMethod === 'CREDIT') return; 
      const isPast = new Date(b.date).getTime() < now;
      const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded);
      const targetGroup = needsAction ? pendingGroups : archivedGroups;
-     
      if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] };
      targetGroup[b.classId].bookings.push({ ...b, isPast });
   });
@@ -391,11 +347,24 @@ const AdminInvoicesTab = () => {
   const archivedClasses = Object.values(archivedGroups).sort((a:any,b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const classesToDisplay = viewMode === 'PENDING' ? pendingClasses : archivedClasses;
 
-  // Actions B2B
   const handleAddProClient = async (e: React.FormEvent) => { e.preventDefault(); if (!newProClient.name || !newProClient.address) return; if (editingProId) { await updateDoc(doc(db, "pro_clients", editingProId), newProClient); setEditingProId(null); } else { await addDoc(collection(db, "pro_clients"), newProClient); } setNewProClient({ name: '', address: '', siret: '' }); const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient))); };
-  const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ce client pro ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
-  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || !b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.qty * b2bInvoiceData.price; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), { clientId: client.id, clientName: client.name, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, updatedAt: nowStr }); setEditingB2bId(null); } else { await addDoc(collection(db, "b2b_invoices"), { clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); };
+  const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
+  
+  const handleCreateDevis = async (e: React.FormEvent) => { 
+    e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); 
+    if (!client || !b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Champs invalides."); 
+    const nowStr = new Date().toISOString(); 
+    const total = b2bInvoiceData.qty * b2bInvoiceData.price;
+    if (editingB2bId) {
+      await updateDoc(doc(db, "b2b_invoices", editingB2bId), { clientId: client.id, clientName: client.name, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, updatedAt: nowStr });
+      setEditingB2bId(null);
+    } else {
+      await addDoc(collection(db, "b2b_invoices"), { clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); 
+    }
+    setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); 
+  };
   const handleDeleteB2b = async (id: string) => { if (confirm("Supprimer cette prestation ?")) await deleteDoc(doc(db, "b2b_invoices", id)); };
+  
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => { const ref = doc(db, "b2b_invoices", invoice.id); let updates: any = {}; const nowStr = new Date().toISOString(); if (action === 'TO_FACTURE') { if(!confirm("Transformer ce Devis en Facture ?")) return; updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; } else if (action === 'TOGGLE_PAYMENT') { const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID'; updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }; } else if (action === 'CHANGE_METHOD' && newVal) { updates = { paymentMethod: newVal, updatedAt: nowStr }; } await updateDoc(ref, updates); const updatedInvoice = { ...invoice, ...updates }; setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i)); if (updatedInvoice.status === 'FACTURE') { syncToSheet({ type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName, date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc, qty: updatedInvoice.qty, price: updatedInvoice.price, total: updatedInvoice.total, paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod }); } };
 
   return (
@@ -435,7 +404,7 @@ const AdminInvoicesTab = () => {
                           {isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black">Retard</span>}
                         </p>
                         <p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>
-                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture prête`}
+                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -458,7 +427,6 @@ const AdminInvoicesTab = () => {
     </div>
   );
 };
-
 
 // --- ONGLET : TOUS LES ELEVES (SANS ADMINS) ---
 const AdminStudentsTab = () => {
@@ -730,7 +698,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
   );
 };
 
-// --- CARTE DU COURS ---
+// --- CARTE DU COURS (AVEC LIEN EXTERNE) ---
 const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const isFull = info.attendeesCount >= info.maxCapacity;
@@ -750,7 +718,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         <div className="flex flex-col items-start mb-3"><div className="text-xl font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl">{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 rounded-md">Tarif : {info.price}</span>}</div>
         <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block">Prof : {info.instructor}</span>
         {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border">{info.description}</p>}
-        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline"><MapPin size={16}/> {info.location}</a></div>
+        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline"><MapPin size={16}/> {info.location}</a></div>
       </div>
 
       {info.externalLink ? (
@@ -797,12 +765,16 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-// --- NOUVEAU: EXPORT MANUEL CSV (SAUVEGARDE) ---
+// --- ONGLET : REGLAGES ET CONFIGURATION ---
 const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
-  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState('');
-  const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '' });
+  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '' });
+  
   const [remDays, setRemDays] = useState(globalSettings.reminderDays);
+  const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || '');
+  const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
+  const [welcomeTextSize, setWelcomeTextSize] = useState(globalSettings.welcomeTextSize || 18);
+  const [welcomeImageSize, setWelcomeImageSize] = useState(globalSettings.welcomeImageSize || 50);
   const [newPack, setNewPack] = useState({ name: '', price: 0, qty: 1, validityDays: 90 });
 
   const addLocation = async () => { if (!newLocName) return; let updatedList; if (editingLocId) { updatedList = locations.map((l:any) => l.id === editingLocId ? { ...l, name: newLocName, address: newLocAddress } : l); setEditingLocId(null); } else { updatedList = [...locations, { id: Date.now().toString(), name: newLocName, address: newLocAddress }]; } await setDoc(doc(db, "settings", "general"), { locations: updatedList }, { merge: true }); setNewLocName(''); setNewLocAddress(''); };
@@ -811,65 +783,97 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
   const removeTemplate = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { templates: templates.filter((t:any) => t.id !== id) }, { merge: true }); };
   const addPack = async (e: React.FormEvent) => { e.preventDefault(); if(!newPack.name) return; let updatedList; if (editingPackId) { updatedList = creditPacks.map((p:any) => p.id === editingPackId ? { ...p, ...newPack } : p); setEditingPackId(null); } else { updatedList = [...creditPacks, { id: Date.now().toString(), ...newPack }]; } await setDoc(doc(db, "settings", "general"), { creditPacks: updatedList }, { merge: true }); setNewPack({ name: '', price: 0, qty: 1, validityDays: 90 }); };
   const removePack = async (id: string) => { if(!confirm("Supprimer ce pack ?")) return; await setDoc(doc(db, "settings", "general"), { creditPacks: creditPacks.filter((p:any) => p.id !== id) }, { merge: true }); };
-  const saveSettings = async () => { await setDoc(doc(db, "settings", "general"), { reminderDays: remDays }, { merge: true }); alert("Enregistré !"); };
-
-  // NOUVEAU: Téléchargement du CSV complet
-  const exportFullBackup = async () => {
-    try {
-      let csv = "COLLECTION;ID;DONNEES\n";
-      const uSnap = await getDocs(collection(db, "users"));
-      uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; });
-      const cSnap = await getDocs(collection(db, "classes"));
-      cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; });
-      const bSnap = await getDocs(collection(db, "bookings"));
-      bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; });
-      
-      const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob));
-      link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`);
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    } catch(e) { alert("Erreur lors de la sauvegarde."); }
+  
+  const saveSettings = async () => { 
+    await setDoc(doc(db, "settings", "general"), { reminderDays: remDays, welcomeText, welcomeImageUrl: welcomeImage, welcomeTextSize, welcomeImageSize }, { merge: true }); 
+    alert("Enregistré !"); 
   };
+
+  const exportFullBackup = async () => { try { let csv = "COLLECTION;ID;DONNEES\n"; const uSnap = await getDocs(collection(db, "users")); uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const cSnap = await getDocs(collection(db, "classes")); cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const bSnap = await getDocs(collection(db, "bookings")); bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch(e) { alert("Erreur."); } };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 lg:col-span-2">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Settings className="text-gray-500"/> Paramètres Généraux</h3>
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div><p className="font-bold">Délai relances paiement</p><p className="text-sm text-gray-500">Jours après le cours avant apparition dans les retards.</p></div>
-          <div className="flex gap-2"><input type="number" value={remDays} onChange={e => setRemDays(Number(e.target.value))} className="p-2 border rounded-lg w-20 text-center font-bold"/><button onClick={saveSettings} className="bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">Valider</button></div>
-        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col justify-between gap-4"><div><p className="font-bold text-gray-800">Délai relances paiement</p><p className="text-sm text-gray-500">Jours après le cours avant apparition dans les retards.</p></div><div className="flex gap-2"><input type="number" value={remDays} onChange={e => setRemDays(Number(e.target.value))} className="p-2 border rounded-lg w-20 text-center font-bold outline-none"/><button onClick={saveSettings} className="bg-gray-800 text-white font-bold py-2 px-4 rounded-lg flex-1">Enregistrer délai</button></div></div>
+          <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 flex flex-col justify-between gap-4"><div><p className="font-bold text-indigo-900 flex items-center gap-2"><Database size={16}/> Sauvegarde des données (Backup)</p><p className="text-sm text-indigo-700">Téléchargez une copie d'urgence (CSV) de toutes vos données Firebase.</p></div><button onClick={exportFullBackup} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"><Download size={16}/> Sauvegarde Manuelle</button></div>
+          
+          {/* NOUVEAU BLOC ACCUEIL AVEC PREVISUALISATION */}
+          <div className="bg-blue-50 p-5 rounded-xl border border-blue-200 md:col-span-2">
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="font-bold text-blue-900 flex items-center gap-2"><Home size={18}/> Personnalisation de l'Accueil</h4>
+              <button onClick={saveSettings} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-colors">Mettre à jour l'accueil</button>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Formulaire */}
+              <div className="space-y-4">
+                <div><label className="text-sm font-bold text-blue-800">Texte de bienvenue</label><textarea value={welcomeText} onChange={e => setWelcomeText(e.target.value)} className="w-full p-3 border border-blue-100 rounded-xl mt-1 min-h-[120px] outline-none focus:border-blue-500" placeholder="Ex: Bienvenue sur notre espace..."></textarea></div>
+                <div><label className="text-sm font-bold text-blue-800">Lien de l'image (URL Postimages/Drive)</label><input type="text" value={welcomeImage} onChange={e => setWelcomeImage(e.target.value)} className="w-full p-3 border border-blue-100 rounded-xl mt-1 outline-none focus:border-blue-500" placeholder="Ex: https://postimg.cc/image.jpg" /></div>
+                
+                <div className="bg-white p-4 rounded-xl border border-blue-100 space-y-4 shadow-sm">
+                  <div>
+                    <label className="text-sm font-bold text-gray-700 flex justify-between">Taille du texte <span>{welcomeTextSize}px</span></label>
+                    <input type="range" min="12" max="36" value={welcomeTextSize} onChange={e => setWelcomeTextSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-gray-700 flex justify-between">Proportion de l'image <span>{welcomeImageSize}%</span></label>
+                    <input type="range" min="20" max="80" value={welcomeImageSize} onChange={e => setWelcomeImageSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" disabled={!welcomeImage} />
+                  </div>
+                </div>
+              </div>
 
-        {/* NOUVEAU: Encadré Sauvegarde */}
-        <div className="mt-4 bg-indigo-50 p-4 rounded-xl border border-indigo-200 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div>
-            <p className="font-bold text-indigo-900 flex items-center gap-2"><Database size={16}/> Sauvegarde des données (Backup)</p>
-            <p className="text-sm text-indigo-700">La sauvegarde automatique est hebdomadaire sur le drive. Tu peux aussi télécharger une copie d'urgence complète ici.</p>
+              {/* Prévisualisation en direct */}
+              <div>
+                <label className="text-sm font-bold text-blue-800 mb-2 block">Aperçu en direct (Simulation) :</label>
+                <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden flex flex-col md:flex-row pointer-events-none scale-90 md:scale-100 origin-top h-full">
+                  {welcomeImage && (
+                    <div style={{ width: `${welcomeImageSize}%` }} className="bg-gray-100 border-b md:border-b-0 md:border-r border-gray-100">
+                      <img src={welcomeImage} alt="Preview" className="w-full h-full object-cover min-h-[150px]" />
+                    </div>
+                  )}
+                  <div style={{ width: welcomeImage ? `${100 - welcomeImageSize}%` : '100%' }} className="p-6 flex flex-col justify-center">
+                    <h2 className="text-xl font-black text-gray-900 mb-4">Bienvenue chez Vertic'Ali !</h2>
+                    <div className="text-gray-600 whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${welcomeTextSize}px` }}>
+                      {welcomeText || "Le texte apparaîtra ici..."}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <button onClick={exportFullBackup} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg whitespace-nowrap flex items-center gap-2 transition-colors"><Download size={16}/> Sauvegarde Manuelle</button>
         </div>
       </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-200 lg:col-span-2 ring-4 ring-amber-50">
-        <h3 className="font-bold text-amber-900 mb-4 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Offres de la Boutique (Crédits)</h3>
-        <form onSubmit={addPack} className="flex flex-col md:flex-row gap-2 mb-4">
-          <input value={newPack.name} onChange={e=>setNewPack({...newPack, name: e.target.value})} placeholder="Nom (Ex: Carte 10 cours)" className="flex-[2] p-2 border rounded-lg"/><input type="number" value={newPack.qty} onChange={e=>setNewPack({...newPack, qty: Number(e.target.value)})} placeholder="Crédits" className="flex-1 p-2 border rounded-lg"/><input type="number" value={newPack.price} onChange={e=>setNewPack({...newPack, price: Number(e.target.value)})} placeholder="Prix (€)" className="flex-1 p-2 border rounded-lg"/><input type="number" value={newPack.validityDays} onChange={e=>setNewPack({...newPack, validityDays: Number(e.target.value)})} placeholder="Validité (jours)" className="flex-1 p-2 border rounded-lg"/>
-          {editingPackId && <button type="button" onClick={()=>{setEditingPackId(null); setNewPack({name:'',price:0,qty:1,validityDays:90});}} className="bg-gray-200 text-gray-700 font-bold px-4 py-2 rounded-lg">Annuler</button>}
-          <button type="submit" className="bg-amber-500 text-white font-bold px-4 py-2 rounded-lg">{editingPackId ? 'MAJ' : 'Ajouter'}</button>
-        </form>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">{creditPacks.map((p:any) => (<div key={p.id} className="flex justify-between items-center bg-amber-50 p-3 rounded-lg border border-amber-100"><div><p className="font-bold text-amber-900">{p.name}</p><p className="text-xs text-amber-700">{p.qty} crédits • {p.price}€ • Valable {p.validityDays}j</p></div><div className="flex gap-1"><button onClick={() => {setEditingPackId(p.id); setNewPack({name: p.name, price: p.price, qty: p.qty, validityDays: p.validityDays});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removePack(p.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div>
-      </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><MapIcon className="text-indigo-500"/> Gestion des Lieux</h3>
-        <div className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200"><input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="Nom du lieu" className="p-2 border rounded-lg"/><input value={newLocAddress} onChange={e=>setNewLocAddress(e.target.value)} placeholder="Adresse complète" className="p-2 border rounded-lg"/><div className="flex gap-2">{editingLocId && <button onClick={()=>{setEditingLocId(null); setNewLocName(''); setNewLocAddress('');}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}<button onClick={addLocation} className="flex-[2] bg-indigo-600 text-white font-bold py-2 rounded-lg">{editingLocId ? 'MAJ' : 'Ajouter'}</button></div></div>
-        <div className="space-y-2">{locations.map((l:any) => (<div key={l.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm"><div><p className="font-bold text-sm">{l.name}</p></div><div className="flex gap-1"><button onClick={() => {setEditingLocId(l.id); setNewLocName(l.name); setNewLocAddress(l.address);}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeLocation(l.id)} className="text-red-500"><Trash2 size={16}/></button></div></div>))}</div>
-      </div>
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-200 lg:col-span-2 ring-4 ring-amber-50"><h3 className="font-bold text-amber-900 mb-4 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Offres de la Boutique (Crédits)</h3><form onSubmit={addPack} className="flex flex-col md:flex-row gap-2 mb-4"><input value={newPack.name} onChange={e=>setNewPack({...newPack, name: e.target.value})} placeholder="Nom (Ex: Carte 10 cours)" className="flex-[2] p-2 border rounded-lg outline-none focus:border-amber-500"/><input type="number" value={newPack.qty} onChange={e=>setNewPack({...newPack, qty: Number(e.target.value)})} placeholder="Crédits" className="flex-1 p-2 border rounded-lg outline-none focus:border-amber-500"/><input type="number" value={newPack.price} onChange={e=>setNewPack({...newPack, price: Number(e.target.value)})} placeholder="Prix (€)" className="flex-1 p-2 border rounded-lg outline-none focus:border-amber-500"/><input type="number" value={newPack.validityDays} onChange={e=>setNewPack({...newPack, validityDays: Number(e.target.value)})} placeholder="Validité (jours)" className="flex-1 p-2 border rounded-lg outline-none focus:border-amber-500"/>{editingPackId && <button type="button" onClick={()=>{setEditingPackId(null); setNewPack({name:'',price:0,qty:1,validityDays:90});}} className="bg-gray-200 text-gray-700 font-bold px-4 py-2 rounded-lg">Annuler</button>}<button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg transition-colors">{editingPackId ? 'MAJ' : 'Ajouter'}</button></form><div className="grid grid-cols-1 md:grid-cols-2 gap-2">{creditPacks.map((p:any) => (<div key={p.id} className="flex justify-between items-center bg-amber-50 p-3 rounded-lg border border-amber-100"><div><p className="font-bold text-amber-900">{p.name}</p><p className="text-xs text-amber-700">{p.qty} crédits • {p.price}€ • Valable {p.validityDays}j</p></div><div className="flex gap-1"><button onClick={() => {setEditingPackId(p.id); setNewPack({name: p.name, price: p.price, qty: p.qty, validityDays: p.validityDays});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removePack(p.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><MapIcon className="text-indigo-500"/> Gestion des Lieux</h3><div className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200"><input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="Nom du lieu" className="p-2 border rounded-lg outline-none"/><input value={newLocAddress} onChange={e=>setNewLocAddress(e.target.value)} placeholder="Adresse complète" className="p-2 border rounded-lg outline-none"/><div className="flex gap-2">{editingLocId && <button onClick={()=>{setEditingLocId(null); setNewLocName(''); setNewLocAddress('');}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}<button onClick={addLocation} className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg transition-colors">{editingLocId ? 'MAJ' : 'Ajouter'}</button></div></div><div className="space-y-2">{locations.map((l:any) => (<div key={l.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm"><div><p className="font-bold text-sm">{l.name}</p></div><div className="flex gap-1"><button onClick={() => {setEditingLocId(l.id); setNewLocName(l.name); setNewLocAddress(l.address);}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeLocation(l.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Plus className="text-amber-500"/> Modèles de cours</h3>
         <form onSubmit={addTemplate} className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
-          <input value={newTpl.title} onChange={e=>setNewTpl({...newTpl, title: e.target.value})} placeholder="Titre" className="p-2 border rounded-lg"/><select value={newTpl.loc} onChange={e=>setNewTpl({...newTpl, loc: e.target.value})} className="p-2 border rounded-lg bg-white">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select><input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="p-2 border rounded-lg"/><input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} className="p-2 border rounded-lg"/><input value={newTpl.externalLink} onChange={e=>setNewTpl({...newTpl, externalLink: e.target.value})} placeholder="Lien externe (Optionnel)" className="p-2 border border-green-300 bg-green-50 rounded-lg"/>
-          <div className="flex gap-2">{editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:''});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}<button type="submit" className="flex-[2] bg-amber-600 text-white font-bold py-2 rounded-lg">{editingTplId ? 'MAJ' : 'Créer'}</button></div>
+          <input value={newTpl.title} onChange={e=>setNewTpl({...newTpl, title: e.target.value})} placeholder="Titre" className="p-2 border rounded-lg outline-none focus:border-amber-500"/>
+          <select value={newTpl.loc} onChange={e=>setNewTpl({...newTpl, loc: e.target.value})} className="p-2 border rounded-lg bg-white outline-none focus:border-amber-500">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
+          <div className="flex gap-2">
+            <input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/>
+            <input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} placeholder="Capacité max" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/>
+          </div>
+          <textarea value={newTpl.desc} onChange={e=>setNewTpl({...newTpl, desc: e.target.value})} placeholder="Description du cours (Optionnel)" className="p-2 border rounded-lg outline-none focus:border-amber-500 min-h-[80px]"/>
+          <input value={newTpl.externalLink} onChange={e=>setNewTpl({...newTpl, externalLink: e.target.value})} placeholder="Lien externe (Optionnel)" className="p-2 border border-green-300 bg-green-50 rounded-lg outline-none focus:border-green-500"/>
+          <div className="flex gap-2 mt-2">
+            {editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:''});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}
+            <button type="submit" className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-lg transition-colors">{editingTplId ? 'Mettre à jour' : 'Créer le modèle'}</button>
+          </div>
         </form>
-        <div className="space-y-2">{templates.map((t:any) => (<div key={t.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm"><div><p className="font-bold text-sm">{t.title}</p></div><div className="flex gap-1"><button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description, externalLink: t.externalLink || ''});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeTemplate(t.id)} className="text-red-500"><Trash2 size={16}/></button></div></div>))}</div>
+        <div className="space-y-2">
+          {templates.map((t:any) => (
+            <div key={t.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm">
+              <div><p className="font-bold text-sm">{t.title}</p></div>
+              <div className="flex gap-1">
+                <button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description || '', externalLink: t.externalLink || ''});}} className="text-amber-500 p-2"><Edit2 size={16}/></button>
+                <button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -879,13 +883,13 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
 const BoutiqueModal = ({ isOpen, onClose, user, packs }: { isOpen: boolean, onClose: () => void, user: UserProfile, packs: CreditPackTemplate[] }) => {
   if (!isOpen) return null; const activeCreds = getActiveCredits(user);
   const handleBuy = async (pack: CreditPackTemplate) => {
-    if (!window.confirm(`Commander "${pack.name}" pour ${pack.price}€ ?`)) return;
+    if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ?`)) return;
     try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement avec le motif 'Pack Credits + Ton Nom'."); onClose(); } catch (e) { alert("Erreur."); }
   };
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
-        <h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>
+        <h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides. Uniquement valables au Picardia !</p>
         {packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map(p => (<div key={p.id} className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Commander</button></div></div>))}</div>)}
         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Fermer</button>
       </div>
@@ -898,7 +902,7 @@ const PaymentInfoModal = ({ isOpen, onClose }: any) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3><p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06 21 05 64 14</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div>
+        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06********</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div>
         <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p></div><button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
       </div>
     </div>
@@ -943,8 +947,8 @@ const UserProfileForm = ({ user, onClose }: any) => {
         {isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}
         <form onSubmit={handleSave} className="space-y-4 mt-4">
           <div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500 border"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div>
-          <div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Coordonnées</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border rounded-xl" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border rounded-xl" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl" /></div></div>
-          <div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl" /></div>
+          <div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Coordonnées</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-amber-500" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl outline-none focus:border-amber-500" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl outline-none focus:border-amber-500" /></div></div>
+          <div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /></div>
           {isFirstTime && (
             <div className="mt-6 pt-6 border-t space-y-5">
               <div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div>
@@ -961,13 +965,10 @@ const UserProfileForm = ({ user, onClose }: any) => {
 // --- ECRAN DE CONNEXION / INSCRIPTION ---
 const LoginScreen = () => {
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [error, setError] = useState('');
-  const [msg, setMsg] = useState('');
+  const [firstName, setFirstName] = useState(''); const [lastName, setLastName] = useState('');
+  const [error, setError] = useState(''); const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -981,23 +982,20 @@ const LoginScreen = () => {
     if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
     if (!firstName || !lastName) { setError('Veuillez renseigner votre nom et prénom.'); setLoading(false); return; }
     if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); setLoading(false); return; }
-    
     try {
       const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       await updateProfile(userCred.user, { displayName: fullName });
-      // On force la mise à jour du nom dans la base de données
-      await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName }, { merge: true });
+      await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName, email: email.trim().toLowerCase(), role: 'student', credits: 0, hasFilledForm: false }, { merge: true });
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.');
-      else setError('Erreur lors de la création du compte.');
+      if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.'); else setError('Erreur lors de la création du compte.');
       setLoading(false);
     }
   };
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault(); setError(''); setMsg(''); setLoading(true);
-    try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien de réinitialisation envoyé par email (Vérifiez vos spams).'); }
+    try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien envoyé par email (Vérifiez vos spams).'); }
     catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); }
     setLoading(false);
   };
@@ -1007,7 +1005,6 @@ const LoginScreen = () => {
       <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
         <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div>
         <h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>
-        
         {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}
         {msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}
 
@@ -1030,7 +1027,7 @@ const LoginScreen = () => {
               <input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
             </div>
             <input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            <input type="password" required placeholder="Mot de passe (min 6 caractères)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            <input type="password" required placeholder="Mot de passe (min 6 car.)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
             <input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
             <button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-50 mt-2 transition-colors">Créer mon compte</button>
             <button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button>
@@ -1057,9 +1054,11 @@ const LoginScreen = () => {
   );
 };
 
+
+// --- APP PRINCIPALE ---
 export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'>('planning');
+  const [activeTab, setActiveTab] = useState<'accueil'|'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
@@ -1090,7 +1089,6 @@ export default function App() {
       setHasInvoiceAlert(alert);
     }
   }, [allPurchases, allBookings, userProfile]);
-
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -1134,10 +1132,8 @@ export default function App() {
           }
           isInitialLoad = false;
        });
-       
        const unsubP = onSnapshot(query(collection(db, "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
        const unsubB = onSnapshot(query(collection(db, "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
-
        return () => { notifUnsub(); unsubP(); unsubB(); };
     }
   }, [userProfile?.role]);
@@ -1152,8 +1148,9 @@ export default function App() {
     fetchAllData();
     onSnapshot(doc(db, "settings", "general"), (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3 });
-      } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3 });
+        const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); 
+        setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 });
+      } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' });
     });
   }, []);
 
@@ -1248,16 +1245,24 @@ export default function App() {
                </div>
              </div>
           </div>
-          <div className="flex gap-4 items-center self-start sm:self-auto">
+          <div className="flex gap-3 items-center self-start sm:self-auto flex-wrap">
             {userProfile?.role === 'admin' && (
               <div className="relative">
-                <button onClick={() => setShowNotifications(!showNotifications)} className="p-3 bg-white rounded-full border shadow-sm hover:bg-gray-50 relative"><Bell size={20} className="text-gray-600"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
+                <button onClick={() => setShowNotifications(!showNotifications)} className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm hover:bg-gray-50 relative"><Bell size={20} className="text-gray-600"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
                 {showNotifications && (
                   <div className="absolute top-14 left-0 sm:left-auto sm:right-0 w-80 max-w-[90vw] bg-white shadow-2xl border border-gray-200 rounded-2xl z-50 overflow-hidden"><div className="p-3 bg-gray-50 border-b font-bold text-gray-800">Notifications</div><div className="max-h-64 overflow-y-auto">{notifications.length === 0 ? <p className="p-4 text-center text-sm text-gray-500">Aucune notification.</p> : notifications.map(n => (<div key={n.id} onClick={() => markNotifRead(n.id)} className={`p-3 border-b text-sm cursor-pointer ${n.read ? 'text-gray-500 bg-white' : 'text-gray-900 bg-blue-50 font-medium'}`}><p>{n.text}</p><span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleString('fr-FR')}</span></div>))}</div></div>
                 )}
               </div>
             )}
-            <button onClick={() => setBoutiqueOpen(true)} className="px-5 py-3 bg-white border-2 border-amber-100 rounded-2xl shadow-sm text-xl font-black text-amber-700 flex gap-2 hover:bg-amber-50 cursor-pointer"><Zap size={22} className="fill-amber-600" /> {activeCreds}</button>
+            <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm hover:bg-pink-50 text-pink-600 transition-colors" title="Instagram Vertic'Ali">
+              <Instagram size={20}/>
+            </a>
+            <div className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl shadow-sm text-lg font-black text-amber-700 flex gap-2 items-center cursor-default select-none">
+              <Zap size={20} className="fill-amber-600" /> {activeCreds}
+            </div>
+            <button onClick={() => setBoutiqueOpen(true)} className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl shadow-md text-sm font-bold flex gap-2 items-center transition-colors">
+              <ShoppingBag size={18} /> Boutique
+            </button>
           </div>
         </header>
 
@@ -1269,6 +1274,7 @@ export default function App() {
         )}
 
         <nav className="flex overflow-x-auto hide-scrollbar gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-gray-100">
+          <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> Accueil</button>
           <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={18}/> Planning</button>
           <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}><History size={18}/> Mon Historique</button>
           {userProfile?.role === 'admin' && (
@@ -1282,6 +1288,25 @@ export default function App() {
             </>
           )}
         </nav>
+
+        {activeTab === 'accueil' && (
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row mb-8">
+            {globalSettings.welcomeImageUrl && (
+              <div style={{ width: window.innerWidth > 768 ? `${globalSettings.welcomeImageSize || 50}%` : '100%' }} className="min-h-[300px] bg-gray-50 border-b md:border-b-0 md:border-r border-gray-100">
+                <img src={globalSettings.welcomeImageUrl} alt="Accueil" className="w-full h-full object-cover" />
+              </div>
+            )}
+            <div style={{ width: (globalSettings.welcomeImageUrl && window.innerWidth > 768) ? `${100 - (globalSettings.welcomeImageSize || 50)}%` : '100%' }} className="p-8 md:p-12 flex flex-col justify-center">
+              <h2 className="text-3xl font-black text-gray-900 mb-6">Bienvenue chez Vertic'Ali !</h2>
+              <div className="text-gray-600 whitespace-pre-wrap leading-relaxed mb-8" style={{ fontSize: `${globalSettings.welcomeTextSize || 18}px` }}>
+                {globalSettings.welcomeText || "Bienvenue sur votre espace de réservation. Consultez le planning pour réserver vos prochaines séances !"}
+              </div>
+              <button onClick={() => setActiveTab('planning')} className="px-8 py-4 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl shadow-lg w-fit flex items-center gap-2 transition-colors">
+                <Calendar size={20}/> Voir le planning
+              </button>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'planning' && (
           <div>
@@ -1366,7 +1391,7 @@ export default function App() {
             </div>
             <div className="flex flex-col gap-3">
               <a href={generateGoogleCalendarLink(bookingSuccessData.title, bookingSuccessData.startAt, bookingSuccessData.endAt, bookingSuccessData.locationAddress || bookingSuccessData.location, bookingSuccessData.description || '')} target="_blank" rel="noreferrer" onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 flex justify-center gap-2"><CalendarPlus size={20}/> Ajouter à mon Agenda</a>
-              <button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600">J'ai compris !</button>
+              <button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600">J'ai compris, à vite !</button>
             </div>
           </div>
         </div>
