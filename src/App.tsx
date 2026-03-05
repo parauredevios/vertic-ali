@@ -435,7 +435,7 @@ const AdminInvoicesTab = () => {
                           {isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black">Retard</span>}
                         </p>
                         <p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>
-                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}
+                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture prête`}
                         </p>
                       </div>
                       <div className="flex gap-2">
