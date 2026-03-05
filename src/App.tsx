@@ -10,7 +10,7 @@ import { db, auth } from './lib/firebase';
 import { 
   collection, getDocs, addDoc, Timestamp, deleteDoc, doc, runTransaction, onSnapshot, setDoc, updateDoc, query, orderBy, where, limit 
 } from 'firebase/firestore';
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
 import jsPDF from 'jspdf'; 
 
@@ -954,6 +954,105 @@ const UserProfileForm = ({ user, onClose }: any) => {
   );
 };
 
+// --- ECRAN DE CONNEXION / INSCRIPTION ---
+const LoginScreen = () => {
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault(); setError(''); setMsg(''); setLoading(true);
+    try { await signInWithEmailAndPassword(auth, email, password); }
+    catch (err) { setError('Email ou mot de passe incorrect.'); setLoading(false); }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault(); setError(''); setMsg(''); setLoading(true);
+    if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
+    if (!firstName || !lastName) { setError('Veuillez renseigner votre nom et prénom.'); setLoading(false); return; }
+    if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); setLoading(false); return; }
+    
+    try {
+      const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      const fullName = `${firstName.trim()} ${lastName.trim()}`;
+      await updateProfile(userCred.user, { displayName: fullName });
+      // On force la mise à jour du nom dans la base de données
+      await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName }, { merge: true });
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.');
+      else setError('Erreur lors de la création du compte.');
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault(); setError(''); setMsg(''); setLoading(true);
+    try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien de réinitialisation envoyé par email (Vérifiez vos spams).'); }
+    catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
+      <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
+        <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div>
+        <h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>
+        
+        {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}
+        {msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}
+
+        {mode === 'login' && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" />
+            <input type="password" required placeholder="Mot de passe" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" />
+            <button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Se connecter</button>
+            <div className="flex justify-between items-center text-sm mt-4 px-1">
+              <button type="button" onClick={() => {setMode('reset'); setError(''); setMsg('');}} className="text-gray-500 hover:text-amber-600 font-medium">Mot de passe oublié ?</button>
+              <button type="button" onClick={() => {setMode('register'); setError(''); setMsg('');}} className="text-amber-600 font-bold hover:text-amber-700">Créer un compte</button>
+            </div>
+          </form>
+        )}
+
+        {mode === 'register' && (
+          <form onSubmit={handleRegister} className="space-y-3">
+            <div className="flex gap-2">
+              <input type="text" required placeholder="Prénom" value={firstName} onChange={e=>setFirstName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+              <input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            </div>
+            <input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            <input type="password" required placeholder="Mot de passe (min 6 caractères)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            <input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            <button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-50 mt-2 transition-colors">Créer mon compte</button>
+            <button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button>
+          </form>
+        )}
+
+        {mode === 'reset' && (
+          <form onSubmit={handleReset} className="space-y-4">
+            <p className="text-sm text-gray-600 mb-4 font-medium">Entrez votre email pour recevoir un lien de réinitialisation.</p>
+            <input type="email" required placeholder="Votre Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
+            <button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Envoyer le lien</button>
+            <button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Retour à la connexion</button>
+          </form>
+        )}
+
+        <div className="mt-8 pt-6 border-t border-gray-100">
+          <button type="button" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm">
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> 
+            {mode === 'register' ? 'S\'inscrire avec Google' : 'Continuer avec Google'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'>('planning');
@@ -1125,15 +1224,7 @@ export default function App() {
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
-  if (!authUser) return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center">
-        <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-40 h-40 object-contain mx-auto"/></div>
-        <h1 className="text-2xl font-bold text-gray-800 mb-2">Vertic'Ali</h1>
-        <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-3 mt-8"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> Connexion Google</button>
-      </div>
-    </div>
-  );
+  if (!authUser) return <LoginScreen />;
 
   const activeCreds = userProfile ? getActiveCredits(userProfile) : 0;
   const unreadNotifs = notifications.filter(n => !n.read).length;
