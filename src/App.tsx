@@ -16,7 +16,7 @@ import jsPDF from 'jspdf';
 // --- CONFIGURATION ---
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
 
-// --- 1. MODÈLES & TYPES ---
+// --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
 interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; color?: string; }
 interface CreditPackTemplate { id: string; name: string; price: number; qty: number; validityDays: number; }
@@ -46,15 +46,16 @@ interface CreditPurchase {
 }
 
 interface ProClient { id: string; name: string; address: string; siret?: string; }
+interface B2BInvoiceItem { desc: string; qty: number; price: number; total?: number; }
 interface B2BInvoice {
-  id: string; clientId: string; clientName: string; date: string; desc: string; qty: number; price: number; total: number;
+  id: string; clientId: string; clientName: string; date: string; items?: B2BInvoiceItem[]; desc?: string; qty?: number; price?: number; total: number;
   status: 'DEVIS' | 'FACTURE'; paymentStatus: 'PENDING' | 'PAID'; paymentMethod: 'ESPECE' | 'VIREMENT_RIB' | 'WERO_PAYPAL'; paidAt?: string; updatedAt?: string;
 }
 
 interface AppNotification { id: string; text: string; date: string; read: boolean; type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT'; }
 type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
-// --- 2. FONCTIONS UTILITAIRES ---
+// --- FONCTIONS UTILITAIRES ---
 const syncToSheet = async (payload: any) => {
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
@@ -78,7 +79,7 @@ const getActiveCredits = (user: UserProfile) => {
   const now = new Date().getTime(); return user.creditPacks.filter(p => new Date(p.expiresAt).getTime() > now).reduce((sum, p) => sum + p.remaining, 0);
 };
 
-// --- FONCTIONS GENERATION PDF (AVEC SEQUENCES INTELLIGENTES) ---
+// --- FONCTIONS GENERATION PDF ---
 const getBase64ImageFromUrl = async (imageUrl: string) => {
   return new Promise<string>((resolve, reject) => {
     const img = new Image(); img.crossOrigin = 'Anonymous';
@@ -100,113 +101,78 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   doc.setTextColor(0, 0, 0); 
 };
 
-const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
-  doc.setDrawColor(200); doc.line(15, 130, 195, 130); doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, 140); doc.text("TVA", 140, 147); doc.text("Total TTC", 140, 157);
-  doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, 157);
+const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130) => {
+  doc.setDrawColor(200); doc.line(15, totalsY, 195, totalsY); 
+  doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, totalsY + 10); doc.text("TVA", 140, totalsY + 17); doc.text("Total TTC", 140, totalsY + 27);
+  doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, totalsY + 10); doc.text("0,00 €", 175, totalsY + 17); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, totalsY + 27);
+  
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
-  const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.", "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL" ];
-  let y = 240; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4.5; });
+  const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€." ];
+  let y = 238; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4; });
+  y += 3;
+  doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+  doc.text("RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL", 105, y, { align: "center" });
+  
   doc.setFillColor(236, 214, 120); doc.rect(0, 268, 210, 30, 'F'); doc.setTextColor(0, 0, 0);
   const greenLines = [ "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle", "18 rue Maurice Domon, Appt C22, 80000 AMIENS", "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com", "SIRET: 94819885800029" ];
   y = 275; greenLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 5; });
 };
 
+const getB2CInvoiceIndex = async (targetId: string, invoiceDate: Date) => {
+  const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+  const [snapB, snapP] = await Promise.all([ getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID"))), getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID"))) ]);
+  const b = snapB.docs.map(d=>({id: d.id, ...d.data()})).filter((x:any) => x.paymentMethod !== 'CREDIT');
+  const p = snapP.docs.map(d=>({id: d.id, ...d.data()}));
+  const all = [...b, ...p].filter((x:any) => { const d = x.paidAt ? new Date(x.paidAt) : new Date(x.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a:any, b:any) => { const da = a.paidAt ? new Date(a.paidAt) : new Date(a.date); const db = b.paidAt ? new Date(b.paidAt) : new Date(b.date); return da.getTime() - db.getTime(); });
+  let index = all.findIndex(x => x.id === targetId) + 1; if (index === 0) index = all.length + 1;
+  return `FAC-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
+};
+
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: { title: string, startAt: Date, price?: string }) => {
   const invoiceDate = booking.paidAt ? new Date(booking.paidAt) : new Date(booking.date);
-  const yyyy = invoiceDate.getFullYear();
-  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-
-  const q = query(collection(db, "bookings"), where("paymentStatus", "==", "PAID")); 
-  const snap = await getDocs(q);
-  const monthBookings = snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as BookingInfo))
-    .filter(b => b.paymentMethod !== 'CREDIT')
-    .filter(b => {
-      const d = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
-      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
-    })
-    .sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
-  
-  let index = monthBookings.findIndex(b => b.id === booking.id) + 1; 
-  if (index === 0) index = monthBookings.length + 1;
-  const invNumber = `FAC-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
-  
-  const doc = new jsPDF(); 
-  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
-  
+  const invNumber = await getB2CInvoiceIndex(booking.id, invoiceDate);
+  const doc = new jsPDF(); const dateStr = invoiceDate.toLocaleDateString('fr-FR'); const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   const clientName = booking.userName.replace(" (Manuel)", ""); const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   let rawPrice = classInfo.price || booking.price || '0'; rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); if (isNaN(Number(rawPrice))) rawPrice = "0"; const priceVal = `${rawPrice},00 €`;
   doc.setFont("helvetica", "normal"); doc.text(`Cours : ${classInfo.title}`, 20, 110); doc.setFontSize(8); doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); doc.setFontSize(10); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); 
-  
-  doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
+  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
   const invoiceDate = purchase.paidAt ? new Date(purchase.paidAt) : new Date(purchase.date);
-  const yyyy = invoiceDate.getFullYear();
-  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-
-  const q = query(collection(db, "credit_purchases"), where("status", "==", "PAID")); 
-  const snap = await getDocs(q);
-  const monthPacks = snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as CreditPurchase))
-    .filter(p => {
-      const d = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
-      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
-    })
-    .sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
-  
-  let index = monthPacks.findIndex(p => p.id === purchase.id) + 1; 
-  if (index === 0) index = monthPacks.length + 1;
-  const invNumber = `FAC-B-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
-  
-  const doc = new jsPDF(); 
-  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
-  
+  const invNumber = await getB2CInvoiceIndex(purchase.id, invoiceDate);
+  const doc = new jsPDF(); const dateStr = invoiceDate.toLocaleDateString('fr-FR'); const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   const clientName = purchase.userName; const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   const priceVal = `${purchase.price.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); doc.text(`Boutique : ${purchase.packName} (${purchase.qty} crédits)`, 20, 110); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); 
-  
-  doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
+  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
-  const invoiceDate = new Date(invoice.date);
-  const yyyy = invoiceDate.getFullYear();
-  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-
-  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
-  const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
-
-  const q = query(collection(db, "b2b_invoices"), where("status", "==", invoice.status)); 
-  const snap = await getDocs(q);
-  const monthInvoices = snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as B2BInvoice))
-    .filter(i => {
-      const d = new Date(i.date);
-      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
-    })
-    .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  
-  let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; 
-  if (index === 0) index = monthInvoices.length + 1;
+  const invoiceDate = new Date(invoice.date); const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE'; const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
+  const snap = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", invoice.status)));
+  const monthInvoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).filter(i => { const d = new Date(i.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = monthInvoices.length + 1;
   const invNumber = `${prefix}-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
 
-  const doc = new jsPDF(); 
-  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
-  
+  const doc = new jsPDF(); const dateStr = invoiceDate.toLocaleDateString('fr-FR'); const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
-  const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`; const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
-  doc.setFont("helvetica", "normal"); const splitDesc = doc.splitTextToSize(invoice.desc, 85); doc.text(splitDesc, 20, 110); doc.text(invoice.qty.toString(), 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(totalVal, 175, 110);
-  renderInvoiceFooter(doc, totalVal); 
   
+  const itemsToDraw = invoice.items && invoice.items.length > 0 ? invoice.items : [{ desc: invoice.desc || '', qty: invoice.qty || 1, price: invoice.price || 0 }];
+  let startY = 110; doc.setFont("helvetica", "normal");
+  itemsToDraw.forEach(item => {
+    const splitDesc = doc.splitTextToSize(item.desc, 85);
+    doc.text(splitDesc, 20, startY); doc.text(item.qty.toString(), 112, startY);
+    doc.text(`${item.price.toFixed(2).replace('.', ',')} €`, 130, startY); doc.text("0", 160, startY);
+    doc.text(`${(item.qty * item.price).toFixed(2).replace('.', ',')} €`, 175, startY);
+    startY += (splitDesc.length * 5) + 3;
+  });
+
+  const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
+  renderInvoiceFooter(doc, totalVal, Math.max(130, startY + 5)); 
   doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
@@ -239,7 +205,7 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
         if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc || ''}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
       });
       setStats({ caMonthB2C: caMB2C, caMonthB2B: caMB2B, caYearB2C: caYB2C, caYearB2B: caYB2B, pendingCount: lateItems.length }); setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime())); setLoading(false);
     }; fetchDashboardData();
@@ -251,7 +217,7 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999); let exportRows: any[] = [];
       const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID"))); snapB2C.docs.forEach(d => { const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) { let priceNum = Number((b.price || '0').replace('€', '').trim()); if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum }); } });
       const snapBoutique = await getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID"))); snapBoutique.docs.forEach(d => { const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price }); });
-      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc, method: b.paymentMethod, amount: b.total }); });
+      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc || 'Prestation', method: b.paymentMethod, amount: b.total }); });
       exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
       let csvContent = "Date de Paiement;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n"; let totalAmount = 0;
       exportRows.forEach(r => { const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); const safeClient = r.client.replace(/"/g, '""'); csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`; totalAmount += r.amount; });
@@ -275,41 +241,13 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
 const AdminBoutiqueTab = () => {
   const [purchases, setPurchases] = useState<CreditPurchase[]>([]);
   useEffect(() => { const unsub = onSnapshot(query(collection(db, "credit_purchases"), orderBy("date", "desc")), (snap) => setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)))); return () => unsub(); }, []);
-  
-  const validatePurchase = async (p: CreditPurchase) => {
-    if(!window.confirm(`Valider le paiement de ${p.price}€ et ajouter ${p.qty} crédits à ${p.userName} ?`)) return;
-    try {
-      const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
-      if (userSnap.empty) return; const userData = userSnap.docs[0].data() as UserProfile;
-      const nowStr = new Date().toISOString(); const expires = new Date(); expires.setDate(expires.getDate() + p.validityDays);
-      await updateDoc(doc(db, "users", p.userId), { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] });
-      await updateDoc(doc(db, "credit_purchases", p.id), { status: 'PAID', paidAt: nowStr });
-      syncToSheet({ type: 'CREDIT_PURCHASE', id: p.id, packName: p.packName, date: new Date().toLocaleDateString('fr-FR'), price: p.price, studentName: p.userName, studentId: p.userId });
-      alert("Crédits ajoutés avec succès !");
-    } catch (e) { alert("Erreur."); }
-  };
-
-  const handleCancelPurchase = async (id: string) => {
-    if (!window.confirm("Supprimer cette commande en attente ?")) return;
-    try { await deleteDoc(doc(db, "credit_purchases", id)); } catch(e) { alert("Erreur lors de l'annulation."); }
-  };
+  const validatePurchase = async (p: CreditPurchase) => { if(!window.confirm(`Valider le paiement de ${p.price}€ et ajouter ${p.qty} crédits à ${p.userName} ?`)) return; try { const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId))); if (userSnap.empty) return; const userData = userSnap.docs[0].data() as UserProfile; const nowStr = new Date().toISOString(); const expires = new Date(); expires.setDate(expires.getDate() + p.validityDays); await updateDoc(doc(db, "users", p.userId), { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] }); await updateDoc(doc(db, "credit_purchases", p.id), { status: 'PAID', paidAt: nowStr }); syncToSheet({ type: 'CREDIT_PURCHASE', id: p.id, packName: p.packName, date: new Date().toLocaleDateString('fr-FR'), price: p.price, studentName: p.userName, studentId: p.userId }); alert("Crédits ajoutés avec succès !"); } catch (e) { alert("Erreur."); } };
+  const handleCancelPurchase = async (id: string) => { if (!window.confirm("Supprimer cette commande en attente ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); } catch(e) { alert("Erreur lors de l'annulation."); } };
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 text-left">
       <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><ShoppingBag className="text-amber-500"/> Commandes de Crédits</h3>
-      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (
-        <div className="space-y-4">{purchases.map(p => (
-          <div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}>
-            <div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>
-            {p.status === 'PENDING' ? (
-              <div className="flex items-center gap-2">
-                <button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1"><CheckCircle size={16}/> Valider</button>
-                <button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg"><Trash2 size={16}/></button>
-              </div>
-            ) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}
-          </div>
-        ))}</div>
-      )}
+      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (<div className="space-y-4">{purchases.map(p => (<div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? (<div className="flex items-center gap-2"><button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1"><CheckCircle size={16}/> Valider</button><button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg"><Trash2 size={16}/></button></div>) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>)}
     </div>
   );
 };
@@ -319,7 +257,9 @@ const AdminInvoicesTab = () => {
   const [allBookings, setAllBookings] = useState<BookingInfo[]>([]); const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
   const [proClients, setProClients] = useState<ProClient[]>([]); const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
   const [newProClient, setNewProClient] = useState<Partial<ProClient>>({}); const [editingProId, setEditingProId] = useState<string | null>(null);
-  const [b2bInvoiceData, setB2bInvoiceData] = useState({ clientId: '', desc: '', qty: 1, price: 0 }); const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
+  
+  const [b2bInvoiceData, setB2bInvoiceData] = useState<{clientId: string, items: B2BInvoiceItem[]}>({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); 
+  const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -331,69 +271,71 @@ const AdminInvoicesTab = () => {
   }, []);
 
   const pendingGroups: any = {}; const archivedGroups: any = {}; const now = new Date().getTime();
-  allBookings.forEach(b => {
-     if (b.paymentMethod === 'CREDIT') return; 
-     const isPast = new Date(b.date).getTime() < now; const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded);
-     const targetGroup = needsAction ? pendingGroups : archivedGroups;
-     if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] };
-     targetGroup[b.classId].bookings.push({ ...b, isPast });
-  });
-
+  allBookings.forEach(b => { if (b.paymentMethod === 'CREDIT') return; const isPast = new Date(b.date).getTime() < now; const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded); const targetGroup = needsAction ? pendingGroups : archivedGroups; if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] }; targetGroup[b.classId].bookings.push({ ...b, isPast }); });
   const pendingClasses = Object.values(pendingGroups).sort((a:any,b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const archivedClasses = Object.values(archivedGroups).sort((a:any,b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const classesToDisplay = viewMode === 'PENDING' ? pendingClasses : archivedClasses;
 
   const handleAddProClient = async (e: React.FormEvent) => { e.preventDefault(); if (!newProClient.name || !newProClient.address) return; if (editingProId) { await updateDoc(doc(db, "pro_clients", editingProId), newProClient); setEditingProId(null); } else { await addDoc(collection(db, "pro_clients"), newProClient); } setNewProClient({ name: '', address: '', siret: '' }); const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient))); };
   const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ce client ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
-  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || !b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.qty * b2bInvoiceData.price; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), { clientId: client.id, clientName: client.name, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, updatedAt: nowStr }); setEditingB2bId(null); } else { await addDoc(collection(db, "b2b_invoices"), { clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); };
+  
+  const handleCreateDevis = async (e: React.FormEvent) => { 
+    e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); 
+    if (!client || b2bInvoiceData.items.length === 0 || b2bInvoiceData.items.some(i => !i.desc || i.qty <= 0 || i.price < 0)) return alert("Champs invalides."); 
+    const nowStr = new Date().toISOString(); 
+    const total = b2bInvoiceData.items.reduce((sum, item) => sum + (item.qty * item.price), 0); 
+    const payload = { clientId: client.id, clientName: client.name, items: b2bInvoiceData.items, total, updatedAt: nowStr, desc: b2bInvoiceData.items[0].desc };
+    if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), payload); setEditingB2bId(null); } 
+    else { await addDoc(collection(db, "b2b_invoices"), { ...payload, date: nowStr, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } 
+    setB2bInvoiceData({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); 
+  };
+  
   const handleDeleteB2b = async (id: string) => { if (confirm("Supprimer cette prestation ?")) await deleteDoc(doc(db, "b2b_invoices", id)); };
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => { const ref = doc(db, "b2b_invoices", invoice.id); let updates: any = {}; const nowStr = new Date().toISOString(); if (action === 'TO_FACTURE') { if(!confirm("Transformer ce Devis en Facture ?")) return; updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; } else if (action === 'TOGGLE_PAYMENT') { const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID'; updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }; } else if (action === 'CHANGE_METHOD' && newVal) { updates = { paymentMethod: newVal, updatedAt: nowStr }; } await updateDoc(ref, updates); const updatedInvoice = { ...invoice, ...updates }; setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i)); if (updatedInvoice.status === 'FACTURE') { syncToSheet({ type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName, date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc, qty: updatedInvoice.qty, price: updatedInvoice.price, total: updatedInvoice.total, paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod }); } };
 
   return (
     <div className="space-y-6 text-left">
-      <div className="flex gap-2 p-1 bg-gray-200 rounded-xl w-fit flex-wrap">
-        <button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 rounded-lg font-bold text-sm ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (À traiter)</button>
-        <button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 rounded-lg font-bold text-sm ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (Archives)</button>
-        <button onClick={() => setViewMode('BOUTIQUE')} className={`px-4 py-2 rounded-lg font-bold text-sm flex gap-1 items-center ${viewMode === 'BOUTIQUE' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500'}`}><ShoppingBag size={14}/> Boutique</button>
-        <button onClick={() => setViewMode('B2B')} className={`px-4 py-2 rounded-lg font-bold text-sm flex gap-1 items-center ${viewMode === 'B2B' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500'}`}><Briefcase size={14}/> Prestations PRO</button>
-      </div>
-
+      <div className="flex gap-2 p-1 bg-gray-200 rounded-xl w-fit flex-wrap"><button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 rounded-lg font-bold text-sm ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (À traiter)</button><button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 rounded-lg font-bold text-sm ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (Archives)</button><button onClick={() => setViewMode('BOUTIQUE')} className={`px-4 py-2 rounded-lg font-bold text-sm flex gap-1 items-center ${viewMode === 'BOUTIQUE' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500'}`}><ShoppingBag size={14}/> Boutique</button><button onClick={() => setViewMode('B2B')} className={`px-4 py-2 rounded-lg font-bold text-sm flex gap-1 items-center ${viewMode === 'B2B' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500'}`}><Briefcase size={14}/> Prestations PRO</button></div>
       {viewMode === 'BOUTIQUE' ? <AdminBoutiqueTab /> : viewMode === 'B2B' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3><form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200"><input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom *" className="p-2 border rounded-lg text-sm outline-none"/><input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border rounded-lg text-sm outline-none"/><input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="SIRET" className="p-2 border rounded-lg text-sm outline-none"/><div className="flex gap-2 mt-2">{editingProId && <button type="button" onClick={()=>{setEditingProId(null); setNewProClient({name:'', address:'', siret:''});}} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg">Annuler</button>}<button type="submit" className="flex-[2] bg-gray-800 text-white font-bold py-2 rounded-lg">{editingProId ? 'Mettre à jour' : 'Ajouter'}</button></div></form><div className="space-y-2 max-h-40 overflow-y-auto pr-2">{proClients.map(c => (<div key={c.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm"><div><p className="font-bold text-sm text-gray-800">{c.name}</p><p className="text-xs text-gray-500">{c.address}</p></div><div className="flex gap-1"><button onClick={() => { setNewProClient(c); setEditingProId(c.id); }} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>{proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4"><select value={b2bInvoiceData.clientId} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, clientId: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none focus:border-indigo-500"><option value="">-- Client --</option>{proClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><textarea value={b2bInvoiceData.desc} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, desc: e.target.value})} placeholder="Description" className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-indigo-500 min-h-[80px]"/><div className="grid grid-cols-2 gap-4"><input type="number" step="0.5" value={b2bInvoiceData.qty} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, qty: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl text-center outline-none focus:border-indigo-500"/><input type="number" step="1" value={b2bInvoiceData.price} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, price: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl text-right outline-none focus:border-indigo-500"/></div><div className="flex gap-2">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', desc:'', qty:1, price:0});}} className="flex-1 bg-gray-200 py-3 rounded-xl font-bold">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 text-white font-bold py-3 rounded-xl">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div></form>)}</div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>{proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4">
+              <select value={b2bInvoiceData.clientId} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, clientId: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none focus:border-indigo-500"><option value="">-- Client --</option>{proClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+              <div className="space-y-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <div className="flex justify-between items-center"><label className="text-xs font-bold text-gray-500 uppercase">Lignes de prestation</label></div>
+                {b2bInvoiceData.items.map((item, idx) => (
+                  <div key={idx} className="flex flex-col gap-2 p-3 bg-white rounded-lg border shadow-sm relative">
+                     <textarea value={item.desc} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].desc = e.target.value; setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Description de la prestation" className="w-full p-2 border rounded-lg outline-none text-sm min-h-[60px]"/>
+                     <div className="flex gap-2 items-center">
+                       <input type="number" step="0.5" value={item.qty} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].qty = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Qté" className="w-20 p-2 border rounded-lg outline-none text-sm text-center"/>
+                       <span className="text-gray-400 text-sm">x</span>
+                       <input type="number" step="1" value={item.price} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].price = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Prix (€)" className="w-24 p-2 border rounded-lg outline-none text-sm text-right"/>
+                       <span className="ml-auto font-bold text-indigo-700 text-sm">{(item.qty * item.price).toFixed(2)} €</span>
+                       {b2bInvoiceData.items.length > 1 && <button type="button" onClick={() => { const newItems = b2bInvoiceData.items.filter((_, i) => i !== idx); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} className="ml-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>}
+                     </div>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setB2bInvoiceData({...b2bInvoiceData, items: [...b2bInvoiceData.items, {desc: '', qty: 1, price: 0}]})} className="w-full py-2 border-2 border-dashed border-indigo-200 text-indigo-600 font-bold rounded-lg text-sm flex justify-center gap-2 hover:bg-indigo-50 transition-colors"><Plus size={16}/> Ajouter une ligne</button>
+              </div>
+              <div className="flex gap-2 mt-4">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', items:[{desc:'', qty:1, price:0}]});}} className="flex-1 bg-gray-200 py-3 rounded-xl font-bold hover:bg-gray-300">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div>
+            </form>)}</div>
           </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3><div className="space-y-4">{b2bInvoices.map(inv => { const client = proClients.find(c => c.id === inv.clientId); return (<div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3"><div className="flex justify-between items-start"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700">{inv.status}</span><span className="font-bold text-gray-800">{inv.clientName}</span></div><p className="text-sm text-gray-600">{inv.desc}</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-indigo-700">{inv.total} €</span>{client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100"><Download size={12}/> PDF</button>}</div></div>{inv.status === 'DEVIS' ? <div className="flex gap-2"><button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg">Passer en Facture</button><button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, desc: inv.desc, qty: inv.qty, price: inv.price }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-lg">Modifier</button><button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"><Trash2 size={16}/></button></div> : (<div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1"><select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 rounded-lg border bg-white outline-none"><option value="ESPECE">Espèces</option><option value="VIREMENT_RIB">Virement</option><option value="WERO_PAYPAL">Wero/Paypal</option></select><button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 rounded-lg text-xs font-bold ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</button><button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>)}</div>); })}</div></div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3><div className="space-y-4">{b2bInvoices.map(inv => { const client = proClients.find(c => c.id === inv.clientId); return (<div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3"><div className="flex justify-between items-start"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700">{inv.status}</span><span className="font-bold text-gray-800">{inv.clientName}</span></div><p className="text-sm text-gray-600">{inv.desc || (inv.items && inv.items[0]?.desc)}</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-indigo-700">{inv.total} €</span>{client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100"><Download size={12}/> PDF</button>}</div></div>{inv.status === 'DEVIS' ? <div className="flex gap-2"><button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg">Passer en Facture</button><button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, items: inv.items && inv.items.length > 0 ? inv.items : [{desc: inv.desc || '', qty: inv.qty || 1, price: inv.price || 0}] }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-50">Modifier</button><button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"><Trash2 size={16}/></button></div> : (<div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1"><select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 rounded-lg border bg-white outline-none"><option value="ESPECE">Espèces</option><option value="VIREMENT_RIB">Virement</option><option value="WERO_PAYPAL">Wero/Paypal</option></select><button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 rounded-lg text-xs font-bold ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</button><button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>)}</div>); })}</div></div>
         </div>
       ) : (
         <div className="space-y-4">
           {classesToDisplay.length === 0 ? <p className="text-gray-500 text-center py-10">Aucune facture dans cette catégorie.</p> : classesToDisplay.map((c:any) => (
             <div key={c.classId} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden text-left">
-              <div className="p-4 bg-gray-50 border-b border-gray-100">
-                <div><h3 className="font-bold text-gray-800 text-lg">{c.classTitle}</h3><p className="text-sm text-gray-500">{new Date(c.date).toLocaleDateString('fr-FR')} - {c.bookings.length} facture(s) concernée(s)</p></div>
-              </div>
+              <div className="p-4 bg-gray-50 border-b border-gray-100"><div><h3 className="font-bold text-gray-800 text-lg">{c.classTitle}</h3><p className="text-sm text-gray-500">{new Date(c.date).toLocaleDateString('fr-FR')} - {c.bookings.length} facture(s) concernée(s)</p></div></div>
               <div className="p-2">
                 {c.bookings.map((b: any) => {
                   const isUnpaidPast = b.paymentStatus === 'PENDING' && b.isPast;
                   return (
                     <div key={b.id} className={`flex justify-between items-center p-3 rounded-xl m-2 border ${isUnpaidPast ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100 shadow-sm'}`}>
-                      <div>
-                        <p className="font-bold text-gray-800 text-sm flex items-center gap-2">
-                          {b.userName.replace(' (Manuel)', '')}
-                          {isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black">Retard</span>}
-                        </p>
-                        <p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>
-                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture téléchargée`}
-                        </p>
-                      </div>
+                      <div><p className="font-bold text-gray-800 text-sm flex items-center gap-2">{b.userName.replace(' (Manuel)', '')}{isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black">Retard</span>}</p><p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>{b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}</p></div>
                       <div className="flex gap-2">
-                        {b.paymentStatus === 'PENDING' && (
-                          <button onClick={async () => {
-                            await updateDoc(doc(db, "bookings", b.id), { paymentStatus: 'PAID', paidAt: new Date().toISOString() });
-                            syncToSheet({ type: 'BOOKING_UPDATE', classId: b.classId, classTitle: b.classTitle, date: b.dateStr, time: b.timeStr, location: b.location || '', studentId: b.userId, studentName: `${b.userName} (${b.paymentMethod})`, paymentStatus: 'PAID', price: b.price });
-                          }} className="p-2 rounded-lg font-bold text-xs bg-green-50 text-green-600 hover:bg-green-100 flex items-center gap-1 border border-green-200"><CheckCircle size={14}/> Valider Paiement</button>
-                        )}
+                        {b.paymentStatus === 'PENDING' && (<button onClick={async () => { await updateDoc(doc(db, "bookings", b.id), { paymentStatus: 'PAID', paidAt: new Date().toISOString() }); syncToSheet({ type: 'BOOKING_UPDATE', classId: b.classId, classTitle: b.classTitle, date: b.dateStr, time: b.timeStr, location: b.location || '', studentId: b.userId, studentName: `${b.userName} (${b.paymentMethod})`, paymentStatus: 'PAID', price: b.price }); }} className="p-2 rounded-lg font-bold text-xs bg-green-50 text-green-600 hover:bg-green-100 flex items-center gap-1 border border-green-200"><CheckCircle size={14}/> Valider Paiement</button>)}
                         <button onClick={async () => { await generateInvoicePDF(b, usersInfo[b.userId] || null, {title: c.classTitle, startAt: new Date(c.date), price: b.price}); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className={`p-2 rounded-lg font-bold text-xs flex items-center gap-1 border ${b.paymentStatus === 'PAID' ? 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100' : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'}`}><Download size={14}/> {b.paymentStatus === 'PAID' ? 'Télécharger & Archiver' : 'Brouillon PDF'}</button>
                       </div>
                     </div>
@@ -425,12 +367,7 @@ const AdminStudentsTab = () => {
     }
   }, [selectedUserId, users]);
 
-  const handleManualCredit = async (u: UserProfile, isAdding: boolean) => {
-    try {
-        if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] });
-        } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } }
-    } catch (e) { alert("Erreur."); }
-  };
+  const handleManualCredit = async (u: UserProfile, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
   const handleSaveMemo = async (u: UserProfile) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
   const handleSaveAdminProfileEdit = async (u: UserProfile) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
 
@@ -448,11 +385,7 @@ const AdminStudentsTab = () => {
             <div key={u.id} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
               <div className="flex justify-between items-center mb-1"><span className="font-bold text-sm text-gray-800">{u.displayName}</span>{!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</div>
               <span className="text-xs text-gray-500 mb-2 truncate">{u.email}</span>
-              <div className="flex gap-2 items-center">
-                <button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, false)}} className="w-6 h-6 bg-gray-200 rounded text-xs font-bold hover:bg-gray-300">-</button>
-                <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded shadow-sm">{getActiveCredits(u)} cr</span>
-                <button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, true)}} className="w-6 h-6 bg-amber-200 text-amber-800 rounded text-xs font-bold hover:bg-amber-300">+</button>
-              </div>
+              <div className="flex gap-2 items-center"><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, false)}} className="w-6 h-6 bg-gray-200 rounded text-xs font-bold hover:bg-gray-300">-</button><span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded shadow-sm">{getActiveCredits(u)} cr</span><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, true)}} className="w-6 h-6 bg-amber-200 text-amber-800 rounded text-xs font-bold hover:bg-amber-300">+</button></div>
             </div>
           ))}
         </div>
@@ -465,10 +398,7 @@ const AdminStudentsTab = () => {
           <>
             <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
               <div><h3 className="font-black text-2xl text-gray-900">{selectedUser.displayName}</h3><p className="text-sm text-gray-500 flex items-center gap-2 mt-1"><Phone size={14}/> {selectedUser.phone || 'Non renseigné'}</p></div>
-              <div className="flex gap-2 bg-gray-100 p-1 rounded-xl">
-                <button onClick={() => setActiveSubTab('history')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeSubTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Historique & Achats</button>
-                <button onClick={() => setActiveSubTab('profile')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeSubTab === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Profil & Mémo</button>
-              </div>
+              <div className="flex gap-2 bg-gray-100 p-1 rounded-xl"><button onClick={() => setActiveSubTab('history')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeSubTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Historique & Achats</button><button onClick={() => setActiveSubTab('profile')} className={`px-4 py-2 rounded-lg text-sm font-bold ${activeSubTab === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Profil & Mémo</button></div>
             </div>
             <div className="flex-1 overflow-y-auto pr-2">
               {activeSubTab === 'history' && (
@@ -480,10 +410,7 @@ const AdminStudentsTab = () => {
                         return (
                           <div key={`b-${b.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-white shadow-sm">
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-700">COURS</span><h4 className="font-bold text-gray-800 text-sm">{b.classTitle}</h4></div><p className="text-xs text-gray-500">{new Date(b.date).toLocaleDateString('fr-FR')} à {new Date(b.date).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p></div>
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">{b.paymentMethod}</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                              {b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}
-                            </div>
+                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">{b.paymentMethod}</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}</div>
                           </div>
                         );
                       } else {
@@ -491,10 +418,7 @@ const AdminStudentsTab = () => {
                         return (
                           <div key={`p-${p.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-amber-200 bg-amber-50 shadow-sm">
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-800">BOUTIQUE</span><h4 className="font-bold text-gray-800 text-sm">{p.packName}</h4></div><p className="text-xs text-gray-500">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p></div>
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                              {p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}
-                            </div>
+                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}</div>
                           </div>
                         );
                       }
@@ -530,12 +454,7 @@ const AdminStudentsTab = () => {
                           <div><label className="text-xs font-bold text-gray-500">Ville</label><input value={editProfileData.city || ''} onChange={e=>setEditProfileData({...editProfileData, city: e.target.value})} className="w-full p-2 border rounded-lg text-sm"/></div>
                           <div><label className="text-xs font-bold text-red-500">Contact Urgence</label><input value={editProfileData.emergencyContact || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyContact: e.target.value})} className="w-full p-2 border rounded-lg text-sm"/></div>
                           <div><label className="text-xs font-bold text-red-500">Tél Urgence</label><input value={editProfileData.emergencyPhone || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyPhone: e.target.value})} className="w-full p-2 border rounded-lg text-sm"/></div>
-                          <div className="col-span-2">
-                            <label className="text-xs font-bold text-gray-500">Droit à l'image</label>
-                            <select value={editProfileData.imageRights || ''} onChange={e=>setEditProfileData({...editProfileData, imageRights: e.target.value as any})} className="w-full p-2 border rounded-lg text-sm bg-white">
-                              <option value="">Non renseigné</option><option value="yes">Oui</option><option value="no">Non</option>
-                            </select>
-                          </div>
+                          <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Droit à l'image</label><select value={editProfileData.imageRights || ''} onChange={e=>setEditProfileData({...editProfileData, imageRights: e.target.value as any})} className="w-full p-2 border rounded-lg text-sm bg-white"><option value="">Non renseigné</option><option value="yes">Oui</option><option value="no">Non</option></select></div>
                         </div>
                         <div className="flex gap-2 pt-2"><button onClick={() => setIsEditingProfile(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg text-sm">Annuler</button><button onClick={() => handleSaveAdminProfileEdit(selectedUser)} className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg text-sm shadow-md">Enregistrer</button></div>
                       </div>
@@ -619,7 +538,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
         {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border">{info.description}</p>}
         <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className={`flex gap-1.5 items-center underline ${info.color ? '' : 'hover:text-amber-600'}`} style={info.color ? {color: info.color} : {}}><MapPin size={16}/> {info.location}</a></div>
       </div>
-      {info.externalLink ? (<a href={info.externalLink} target="_blank" rel="noreferrer" style={btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white text-center block shadow-lg transition-colors ${!info.color ? 'bg-green-500 hover:bg-green-600 shadow-green-200' : ''}`}>Réserver sur le site partenaire</a>) : isBooked ? (<button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">Annuler ma réservation</button>) : (<button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} style={btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : !info.color ? 'bg-gradient-to-r from-amber-500 to-amber-600' : ''}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>)}
+      {info.externalLink ? (<a href={info.externalLink} target="_blank" rel="noreferrer" style={btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white text-center block shadow-lg transition-colors ${!info.color ? 'bg-green-500 hover:bg-green-600 shadow-green-200' : ''}`}>Réserver sur le site partenaire</a>) : isBooked ? (<button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">Annuler ma réservation</button>) : (<button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} style={(!canBook || isFull || info.endAt < new Date()) ? {} : btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : !info.color ? 'bg-gradient-to-r from-amber-500 to-amber-600' : ''}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>)}
       {userProfile?.role === 'admin' && !info.externalLink && <div className="mt-4"><button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 rounded-xl"><Users size={16}/> Inscrits {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button>{showAttendees && <AdminClassAttendees classInfo={info} onRefresh={onRefresh} />}</div>}
     </div>
   );
@@ -962,7 +881,7 @@ export default function App() {
         {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && <AdminInvoicesTab />}
         {activeTab === 'admin_students' && userProfile?.role === 'admin' && <AdminStudentsTab />}
         {activeTab === 'admin_past' && userProfile?.role === 'admin' && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
-        {activeTab === 'admin_settings' && userProfile?.role === 'admin' && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks}/>}
+        {activeTab === 'admin_settings' && userProfile?.role === 'admin' && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} />}
       </div>
 
       {showProfile && userProfile && <UserProfileForm user={userProfile} onClose={() => setShowProfile(false)}/>}
