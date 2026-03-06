@@ -18,21 +18,20 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVW
 
 // --- 1. MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
-interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; }
+interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; color?: string; }
 interface CreditPackTemplate { id: string; name: string; price: number; qty: number; validityDays: number; }
 interface GlobalSettings { reminderDays: number; welcomeText?: string; welcomeImageUrl?: string; welcomeTextSize?: number; welcomeImageSize?: number; }
 
 interface DanceClass {
   id: string; title: string; description?: string; price: string;
   startAt: Date; endAt: Date; maxCapacity: number; attendeesCount: number;
-  attendeeIds: string[]; instructor: string; location: string; locationAddress?: string; invoiceArchived?: boolean; externalLink?: string;
+  attendeeIds: string[]; instructor: string; location: string; locationAddress?: string; invoiceArchived?: boolean; externalLink?: string; color?: string;
 }
 
 interface UserProfile {
   id: string; email: string; displayName: string; role: 'student' | 'admin';
   birthDate?: string; street?: string; zipCode?: string; city?: string; phone?: string; emergencyContact?: string; emergencyPhone?: string;
-  hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string;
-  credits?: number;
+  hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string; credits?: number;
   creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];
 }
 
@@ -59,11 +58,10 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 const syncToSheet = async (payload: any) => {
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
-    const actionDate = new Date().toLocaleString('fr-FR');
-    const enrichedPayload = { actionDate, ...payload };
+    const actionDate = new Date().toLocaleString('fr-FR'); const enrichedPayload = { actionDate, ...payload };
     if (payload.type === 'BOOKING') enrichedPayload.sheetName = payload.paymentStatus === 'PAID' ? 'Payer' : 'NON PAYÉ';
     await fetch(GOOGLE_SCRIPT_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(enrichedPayload) });
-  } catch (e) { console.error("Erreur Sync Sheets"); }
+  } catch (e) {}
 };
 
 const sendNotification = async (text: string, type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT') => {
@@ -80,14 +78,11 @@ const getActiveCredits = (user: UserProfile) => {
   const now = new Date().getTime(); return user.creditPacks.filter(p => new Date(p.expiresAt).getTime() > now).reduce((sum, p) => sum + p.remaining, 0);
 };
 
-// --- FONCTIONS GENERATION PDF ---
+// --- FONCTIONS GENERATION PDF (AVEC SEQUENCES INTELLIGENTES) ---
 const getBase64ImageFromUrl = async (imageUrl: string) => {
   return new Promise<string>((resolve, reject) => {
     const img = new Image(); img.crossOrigin = 'Anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
-      const ctx = canvas.getContext('2d'); if (ctx) { ctx.drawImage(img, 0, 0); resolve(canvas.toDataURL('image/png')); } else reject('Canvas error');
-    };
+    img.onload = () => { const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height; const ctx = canvas.getContext('2d'); if (ctx) { ctx.drawImage(img, 0, 0); resolve(canvas.toDataURL('image/png')); } else reject('Canvas error'); };
     img.onerror = reject; img.src = imageUrl + '?t=' + new Date().getTime();
   });
 };
@@ -107,38 +102,37 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
 
 const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
   doc.setDrawColor(200); doc.line(15, 130, 195, 130); doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, 140); doc.text("TVA", 140, 147); doc.text("Total TTC", 140, 157);
-  // Ici, le Total TTC est repassé en noir (0, 0, 0)
   doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, 140); doc.text("0,00 €", 175, 147); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, 157);
-  
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
   const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.", "RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL" ];
   let y = 240; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4.5; });
-  
-  // Bandeau jaune (236, 214, 120) et texte en noir (0, 0, 0)
   doc.setFillColor(236, 214, 120); doc.rect(0, 268, 210, 30, 'F'); doc.setTextColor(0, 0, 0);
   const greenLines = [ "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle", "18 rue Maurice Domon, Appt C22, 80000 AMIENS", "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com", "SIRET: 94819885800029" ];
   y = 275; greenLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 5; });
 };
 
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: { title: string, startAt: Date, price?: string }) => {
-  const doc = new jsPDF();
-  const dateStr = booking.paidAt ? new Date(booking.paidAt).toLocaleDateString('fr-FR') : new Date(booking.date).toLocaleDateString('fr-FR');
-  const invNumber = `FAC-${new Date(booking.date).getFullYear()}${String(new Date(booking.date).getMonth()+1).padStart(2,'0')}${String(new Date(booking.date).getDate()).padStart(2,'0')}-${booking.userId.slice(0,4).toUpperCase()}`;
-  const clientName = booking.userName.replace(" (Manuel)", "");
-  const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
+  const q = query(collection(db, "bookings"), where("userId", "==", booking.userId), where("paymentStatus", "==", "PAID")); const snap = await getDocs(q);
+  const paidBookings = snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)).filter(b => b.paymentMethod !== 'CREDIT').sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
+  let index = paidBookings.findIndex(b => b.id === booking.id) + 1; if (index === 0) index = 1;
+  const invNumber = `FAC-${booking.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+  
+  const doc = new jsPDF(); const dateStr = booking.paidAt ? new Date(booking.paidAt).toLocaleDateString('fr-FR') : new Date(booking.date).toLocaleDateString('fr-FR');
+  const clientName = booking.userName.replace(" (Manuel)", ""); const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
-  let rawPrice = classInfo.price || booking.price || '0'; rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim();
-  if (isNaN(Number(rawPrice))) rawPrice = "0"; const priceVal = `${rawPrice},00 €`;
+  let rawPrice = classInfo.price || booking.price || '0'; rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); if (isNaN(Number(rawPrice))) rawPrice = "0"; const priceVal = `${rawPrice},00 €`;
   doc.setFont("helvetica", "normal"); doc.text(`Cours : ${classInfo.title}`, 20, 110); doc.setFontSize(8); doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); doc.setFontSize(10); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
   renderInvoiceFooter(doc, priceVal); doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
-  const doc = new jsPDF();
-  const dateStr = purchase.paidAt ? new Date(purchase.paidAt).toLocaleDateString('fr-FR') : new Date(purchase.date).toLocaleDateString('fr-FR');
-  const invNumber = `FAC-B-${new Date(purchase.date).getFullYear()}${String(new Date(purchase.date).getMonth()+1).padStart(2,'0')}${String(new Date(purchase.date).getDate()).padStart(2,'0')}-${purchase.userId.slice(0,4).toUpperCase()}`;
-  const clientName = purchase.userName;
-  const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
+  const q = query(collection(db, "credit_purchases"), where("userId", "==", purchase.userId), where("status", "==", "PAID")); const snap = await getDocs(q);
+  const paidPacks = snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase)).sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
+  let index = paidPacks.findIndex(p => p.id === purchase.id) + 1; if (index === 0) index = 1;
+  const invNumber = `FAC-B-${purchase.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+  
+  const doc = new jsPDF(); const dateStr = purchase.paidAt ? new Date(purchase.paidAt).toLocaleDateString('fr-FR') : new Date(purchase.date).toLocaleDateString('fr-FR');
+  const clientName = purchase.userName; const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   const priceVal = `${purchase.price.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); doc.text(`Boutique : ${purchase.packName} (${purchase.qty} crédits)`, 20, 110); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
@@ -146,11 +140,14 @@ const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: 
 };
 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
-  const doc = new jsPDF();
-  const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
-  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
+  const q = query(collection(db, "b2b_invoices"), where("clientId", "==", invoice.clientId)); const snap = await getDocs(q);
+  const invoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  let index = invoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = 1;
   const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC';
-  const invNumber = `${prefix}-PRO-${new Date(invoice.date).getFullYear()}${String(new Date(invoice.date).getMonth()+1).padStart(2,'0')}-${invoice.id.slice(0,4).toUpperCase()}`;
+  const invNumber = `${prefix}-PRO-${client.id.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+
+  const doc = new jsPDF(); const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
+  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
   const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`; const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); const splitDesc = doc.splitTextToSize(invoice.desc, 85); doc.text(splitDesc, 20, 110); doc.text(invoice.qty.toString(), 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(totalVal, 175, 110);
@@ -165,83 +162,46 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      const now = new Date(); const currentYear = now.getFullYear();
-      const firstDayOfMonth = new Date(currentYear, now.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
+      const now = new Date(); const currentYear = now.getFullYear(); const firstDayOfMonth = new Date(currentYear, now.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
       let caMB2C = 0; let caMB2B = 0; let caYB2C = 0; let caYB2B = 0; let lateItems: any[] = [];
 
       const snapB2C = await getDocs(query(collection(db, "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
-        if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') {
-          let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim());
-          if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; }
-        }
-        if (b.paymentStatus === 'PENDING') {
-          const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); 
-          if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate });
-        }
+        if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
+        if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
       });
 
       const snapBoutique = await getDocs(query(collection(db, "credit_purchases")));
       snapBoutique.docs.forEach(d => {
         const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
         if (p.status === 'PAID') { if (accDate >= firstDayOfMonth) caMB2C += p.price; if (accDate >= firstDayOfYear) caYB2C += p.price; }
-        if (p.status === 'PENDING') {
-          const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); 
-          if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate });
-        }
+        if (p.status === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate }); }
       });
 
       const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
         if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') {
-          const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); 
-          if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate });
-        }
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
       });
-      setStats({ caMonthB2C: caMB2C, caMonthB2B: caMB2B, caYearB2C: caYB2C, caYearB2B: caYB2B, pendingCount: lateItems.length });
-      setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime())); setLoading(false);
-    };
-    fetchDashboardData();
+      setStats({ caMonthB2C: caMB2C, caMonthB2B: caMB2B, caYearB2C: caYB2C, caYearB2B: caYB2B, pendingCount: lateItems.length }); setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime())); setLoading(false);
+    }; fetchDashboardData();
   }, [reminderDays]);
 
   const handleExportCSV = async (start: Date, end: Date, periodName: string) => {
     setIsExporting(true);
     try {
       const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999); let exportRows: any[] = [];
-      const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID")));
-      snapB2C.docs.forEach(d => {
-        const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; 
-        const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
-        if (accDate >= start && accDate <= endOfDay) {
-          let priceNum = Number((b.price || '0').replace('€', '').trim());
-          if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum });
-        }
-      });
-      const snapBoutique = await getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID")));
-      snapBoutique.docs.forEach(d => {
-        const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
-        if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price });
-      });
-      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID")));
-      snapB2B.docs.forEach(d => {
-        const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
-        if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc, method: b.paymentMethod, amount: b.total });
-      });
+      const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID"))); snapB2C.docs.forEach(d => { const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) { let priceNum = Number((b.price || '0').replace('€', '').trim()); if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum }); } });
+      const snapBoutique = await getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID"))); snapBoutique.docs.forEach(d => { const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price }); });
+      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc, method: b.paymentMethod, amount: b.total }); });
       exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
       let csvContent = "Date de Paiement;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n"; let totalAmount = 0;
-      exportRows.forEach(r => {
-        const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); const safeClient = r.client.replace(/"/g, '""');
-        csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`; totalAmount += r.amount;
-      });
+      exportRows.forEach(r => { const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); const safeClient = r.client.replace(/"/g, '""'); csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`; totalAmount += r.amount; });
       csvContent += `;;;;TOTAL;${totalAmount}\n`;
-      const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Export_URSSAF_${periodName}.csv`);
-      link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    } catch (error) { alert("Erreur export."); }
-    setIsExporting(false);
+      const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Export_URSSAF_${periodName}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    } catch (error) { alert("Erreur export."); } setIsExporting(false);
   };
   const exportCurrentMonth = () => { const now = new Date(); handleExportCSV(new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0), `Mois_${now.getMonth()+1}_${now.getFullYear()}`); };
   const exportCustomPeriod = () => { if (!exportStartDate || !exportEndDate) return alert("Dates requises."); const start = new Date(exportStartDate); const end = new Date(exportEndDate); if (start > end) return; handleExportCSV(start, end, `Periode_${exportStartDate}_au_${exportEndDate}`); };
@@ -249,38 +209,9 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
 
   return (
     <div className="space-y-8 text-left">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-4 mb-4"><div className="p-3 bg-green-50 text-green-600 rounded-xl"><TrendingUp size={24}/></div><p className="font-bold text-gray-500 uppercase">CA Élèves</p></div>
-          <p className="text-3xl font-black text-gray-800">{stats.caMonthB2C} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2C} €</p>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-4 mb-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><Briefcase size={24}/></div><p className="font-bold text-gray-500 uppercase">CA PRO</p></div>
-          <p className="text-3xl font-black text-gray-800">{stats.caMonthB2B} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2B} €</p>
-        </div>
-        <div className="bg-gray-800 p-6 rounded-2xl shadow-md border border-gray-700">
-          <div className="flex items-center gap-4 mb-4"><div className="p-3 bg-amber-500 text-gray-900 rounded-xl"><Wallet size={24}/></div><p className="font-bold text-gray-400 uppercase">CA TOTAL</p></div>
-          <p className="text-3xl font-black text-white">{stats.caMonthB2C + stats.caMonthB2B} € <span className="text-sm font-normal text-gray-500">/ mois</span></p><p className="text-sm font-bold text-amber-500 mt-2">Année : {stats.caYearB2C + stats.caYearB2B} €</p>
-        </div>
-      </div>
-      <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3"><div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl"><FileSpreadsheet size={24}/></div><div><h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3><p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes.</p></div></div>
-          <button onClick={exportCurrentMonth} disabled={isExporting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex gap-2">{isExporting ? <Loader2 className="animate-spin" size={18}/> : <Download size={18}/>} Export du Mois</button>
-        </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row items-center gap-4">
-          <span className="text-sm font-bold text-gray-600">Période :</span><input type="date" value={exportStartDate} onChange={e=>setExportStartDate(e.target.value)} className="p-2 border rounded-lg text-sm" /> à <input type="date" value={exportEndDate} onChange={e=>setExportEndDate(e.target.value)} className="p-2 border rounded-lg text-sm" />
-          <button onClick={exportCustomPeriod} disabled={isExporting || !exportStartDate || !exportEndDate} className="bg-white border border-gray-300 px-4 py-2 rounded-lg font-bold text-sm">Exporter</button>
-        </div>
-      </div>
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2"><AlertTriangle className="text-orange-500"/><h3 className="font-bold text-gray-800 text-lg">Retards de paiement (&gt; {reminderDays} j)</h3></div>
-        <div className="p-5">
-          {reminders.length === 0 ? <p className="text-gray-500">Aucun retard.</p> : (
-            <div className="space-y-3">{reminders.map(r => (<div key={r.id} className="flex justify-between items-center bg-white p-4 rounded-xl border border-red-100 shadow-sm"><div><div className="flex items-center gap-2 mb-1"><span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${r.type === 'PRO' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{r.type}</span><p className="font-bold text-gray-800">{r.name}</p></div><p className="text-xs text-gray-500">{r.desc}</p></div><div className="text-right"><p className="font-bold text-red-600">{r.price}</p><p className="text-xs text-gray-400">Via {r.method}</p></div></div>))}</div>
-          )}
-        </div>
-      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-green-50 text-green-600 rounded-xl"><TrendingUp size={24}/></div><p className="font-bold text-gray-500 uppercase">CA Élèves</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2C} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2C} €</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><Briefcase size={24}/></div><p className="font-bold text-gray-500 uppercase">CA PRO</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2B} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2B} €</p></div><div className="bg-gray-800 p-6 rounded-2xl shadow-md border border-gray-700"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-amber-500 text-gray-900 rounded-xl"><Wallet size={24}/></div><p className="font-bold text-gray-400 uppercase">CA TOTAL</p></div><p className="text-3xl font-black text-white">{stats.caMonthB2C + stats.caMonthB2B} € <span className="text-sm font-normal text-gray-500">/ mois</span></p><p className="text-sm font-bold text-amber-500 mt-2">Année : {stats.caYearB2C + stats.caYearB2B} €</p></div></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6"><div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6"><div className="flex items-center gap-3"><div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl"><FileSpreadsheet size={24}/></div><div><h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3><p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes.</p></div></div><button onClick={exportCurrentMonth} disabled={isExporting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex gap-2">{isExporting ? <Loader2 className="animate-spin" size={18}/> : <Download size={18}/>} Export du Mois</button></div><div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row items-center gap-4"><span className="text-sm font-bold text-gray-600">Période :</span><input type="date" value={exportStartDate} onChange={e=>setExportStartDate(e.target.value)} className="p-2 border rounded-lg text-sm" /> à <input type="date" value={exportEndDate} onChange={e=>setExportEndDate(e.target.value)} className="p-2 border rounded-lg text-sm" /><button onClick={exportCustomPeriod} disabled={isExporting || !exportStartDate || !exportEndDate} className="bg-white border border-gray-300 px-4 py-2 rounded-lg font-bold text-sm">Exporter</button></div></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden"><div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2"><AlertTriangle className="text-orange-500"/><h3 className="font-bold text-gray-800 text-lg">Retards de paiement (&gt; {reminderDays} j)</h3></div><div className="p-5">{reminders.length === 0 ? <p className="text-gray-500">Aucun retard.</p> : (<div className="space-y-3">{reminders.map(r => (<div key={r.id} className="flex justify-between items-center bg-white p-4 rounded-xl border border-red-100 shadow-sm"><div><div className="flex items-center gap-2 mb-1"><span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${r.type === 'PRO' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{r.type}</span><p className="font-bold text-gray-800">{r.name}</p></div><p className="text-xs text-gray-500">{r.desc}</p></div><div className="text-right"><p className="font-bold text-red-600">{r.price}</p><p className="text-xs text-gray-400">Via {r.method}</p></div></div>))}</div>)}</div></div>
     </div>
   );
 };
@@ -329,16 +260,10 @@ const AdminBoutiqueTab = () => {
 
 const AdminInvoicesTab = () => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
-  const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
-  const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
-  
-  const [proClients, setProClients] = useState<ProClient[]>([]);
-  const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
-  const [newProClient, setNewProClient] = useState<Partial<ProClient>>({});
-  const [editingProId, setEditingProId] = useState<string | null>(null);
-  
-  const [b2bInvoiceData, setB2bInvoiceData] = useState({ clientId: '', desc: '', qty: 1, price: 0 });
-  const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
+  const [allBookings, setAllBookings] = useState<BookingInfo[]>([]); const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
+  const [proClients, setProClients] = useState<ProClient[]>([]); const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
+  const [newProClient, setNewProClient] = useState<Partial<ProClient>>({}); const [editingProId, setEditingProId] = useState<string | null>(null);
+  const [b2bInvoiceData, setB2bInvoiceData] = useState({ clientId: '', desc: '', qty: 1, price: 0 }); const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -352,8 +277,7 @@ const AdminInvoicesTab = () => {
   const pendingGroups: any = {}; const archivedGroups: any = {}; const now = new Date().getTime();
   allBookings.forEach(b => {
      if (b.paymentMethod === 'CREDIT') return; 
-     const isPast = new Date(b.date).getTime() < now;
-     const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded);
+     const isPast = new Date(b.date).getTime() < now; const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded);
      const targetGroup = needsAction ? pendingGroups : archivedGroups;
      if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] };
      targetGroup[b.classId].bookings.push({ ...b, isPast });
@@ -364,23 +288,9 @@ const AdminInvoicesTab = () => {
   const classesToDisplay = viewMode === 'PENDING' ? pendingClasses : archivedClasses;
 
   const handleAddProClient = async (e: React.FormEvent) => { e.preventDefault(); if (!newProClient.name || !newProClient.address) return; if (editingProId) { await updateDoc(doc(db, "pro_clients", editingProId), newProClient); setEditingProId(null); } else { await addDoc(collection(db, "pro_clients"), newProClient); } setNewProClient({ name: '', address: '', siret: '' }); const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient))); };
-  const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
-  
-  const handleCreateDevis = async (e: React.FormEvent) => { 
-    e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); 
-    if (!client || !b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Champs invalides."); 
-    const nowStr = new Date().toISOString(); 
-    const total = b2bInvoiceData.qty * b2bInvoiceData.price;
-    if (editingB2bId) {
-      await updateDoc(doc(db, "b2b_invoices", editingB2bId), { clientId: client.id, clientName: client.name, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, updatedAt: nowStr });
-      setEditingB2bId(null);
-    } else {
-      await addDoc(collection(db, "b2b_invoices"), { clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); 
-    }
-    setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); 
-  };
+  const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ce client ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
+  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || !b2bInvoiceData.desc || b2bInvoiceData.price <= 0 || b2bInvoiceData.qty <= 0) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.qty * b2bInvoiceData.price; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), { clientId: client.id, clientName: client.name, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, updatedAt: nowStr }); setEditingB2bId(null); } else { await addDoc(collection(db, "b2b_invoices"), { clientId: client.id, clientName: client.name, date: nowStr, updatedAt: nowStr, desc: b2bInvoiceData.desc, qty: b2bInvoiceData.qty, price: b2bInvoiceData.price, total, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', desc: '', qty: 1, price: 0 }); };
   const handleDeleteB2b = async (id: string) => { if (confirm("Supprimer cette prestation ?")) await deleteDoc(doc(db, "b2b_invoices", id)); };
-  
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => { const ref = doc(db, "b2b_invoices", invoice.id); let updates: any = {}; const nowStr = new Date().toISOString(); if (action === 'TO_FACTURE') { if(!confirm("Transformer ce Devis en Facture ?")) return; updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; } else if (action === 'TOGGLE_PAYMENT') { const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID'; updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }; } else if (action === 'CHANGE_METHOD' && newVal) { updates = { paymentMethod: newVal, updatedAt: nowStr }; } await updateDoc(ref, updates); const updatedInvoice = { ...invoice, ...updates }; setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i)); if (updatedInvoice.status === 'FACTURE') { syncToSheet({ type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName, date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc, qty: updatedInvoice.qty, price: updatedInvoice.price, total: updatedInvoice.total, paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod }); } };
 
   return (
@@ -392,9 +302,7 @@ const AdminInvoicesTab = () => {
         <button onClick={() => setViewMode('B2B')} className={`px-4 py-2 rounded-lg font-bold text-sm flex gap-1 items-center ${viewMode === 'B2B' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500'}`}><Briefcase size={14}/> Prestations PRO</button>
       </div>
 
-      {viewMode === 'BOUTIQUE' ? (
-        <AdminBoutiqueTab />
-      ) : viewMode === 'B2B' ? (
+      {viewMode === 'BOUTIQUE' ? <AdminBoutiqueTab /> : viewMode === 'B2B' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3><form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200"><input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom *" className="p-2 border rounded-lg text-sm outline-none"/><input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border rounded-lg text-sm outline-none"/><input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="SIRET" className="p-2 border rounded-lg text-sm outline-none"/><div className="flex gap-2 mt-2">{editingProId && <button type="button" onClick={()=>{setEditingProId(null); setNewProClient({name:'', address:'', siret:''});}} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg">Annuler</button>}<button type="submit" className="flex-[2] bg-gray-800 text-white font-bold py-2 rounded-lg">{editingProId ? 'Mettre à jour' : 'Ajouter'}</button></div></form><div className="space-y-2 max-h-40 overflow-y-auto pr-2">{proClients.map(c => (<div key={c.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm"><div><p className="font-bold text-sm text-gray-800">{c.name}</p><p className="text-xs text-gray-500">{c.address}</p></div><div className="flex gap-1"><button onClick={() => { setNewProClient(c); setEditingProId(c.id); }} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
@@ -444,24 +352,13 @@ const AdminInvoicesTab = () => {
   );
 };
 
-// --- ONGLET : TOUS LES ELEVES (SANS ADMINS) ---
 const AdminStudentsTab = () => {
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [userBookings, setUserBookings] = useState<BookingInfo[]>([]);
-  const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history');
-  const [memoText, setMemoText] = useState('');
-  const [savingMemo, setSavingMemo] = useState(false);
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [editProfileData, setEditProfileData] = useState<Partial<UserProfile>>({});
+  const [users, setUsers] = useState<UserProfile[]>([]); const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
+  const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false); const [editProfileData, setEditProfileData] = useState<Partial<UserProfile>>({});
 
-  useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, "users")), (snap) => setUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile))));
-    return () => unsub();
-  }, []);
-
+  useEffect(() => { const unsub = onSnapshot(query(collection(db, "users")), (snap) => setUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsub(); }, []);
   useEffect(() => {
     if (selectedUserId) {
       const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", selectedUserId)), (snap) => { setUserBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))); });
@@ -474,32 +371,12 @@ const AdminStudentsTab = () => {
 
   const handleManualCredit = async (u: UserProfile, isAdding: boolean) => {
     try {
-        if (isAdding) {
-            const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); 
-            const newPack = { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() };
-            await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), newPack] });
-        } else {
-            if (u.creditPacks && u.creditPacks.length > 0) {
-                const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0);
-                if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); }
-            }
-        }
+        if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] });
+        } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } }
     } catch (e) { alert("Erreur."); }
   };
-
-  const handleSaveMemo = async (u: UserProfile) => {
-    setSavingMemo(true);
-    try {
-      await updateDoc(doc(db, "users", u.id), { adminMemo: memoText });
-      await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, credits: u.credits, birthDate: u.birthDate, phone: u.phone, street: u.street, zipCode: u.zipCode, city: u.city, emergencyContact: u.emergencyContact, emergencyPhone: u.emergencyPhone, legalAccepted: true, imageRights: u.imageRights, adminMemo: memoText });
-      alert("Mémo enregistré !");
-    } catch (e) { alert("Erreur lors de l'enregistrement."); }
-    setSavingMemo(false);
-  };
-
-  const handleSaveAdminProfileEdit = async (u: UserProfile) => {
-    try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) { alert("Erreur."); }
-  };
+  const handleSaveMemo = async (u: UserProfile) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
+  const handleSaveAdminProfileEdit = async (u: UserProfile) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
 
   const filteredUsers = users.filter(u => u.role !== 'admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
   const selectedUser = users.find(u => u.id === selectedUserId);
@@ -549,7 +426,7 @@ const AdminStudentsTab = () => {
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-700">COURS</span><h4 className="font-bold text-gray-800 text-sm">{b.classTitle}</h4></div><p className="text-xs text-gray-500">{new Date(b.date).toLocaleDateString('fr-FR')} à {new Date(b.date).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p></div>
                             <div className="flex flex-col items-end gap-2">
                               <div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">{b.paymentMethod}</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                              {b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100"><Download size={12}/> Facture PDF</button>}
+                              {b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}
                             </div>
                           </div>
                         );
@@ -560,7 +437,7 @@ const AdminStudentsTab = () => {
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-800">BOUTIQUE</span><h4 className="font-bold text-gray-800 text-sm">{p.packName}</h4></div><p className="text-xs text-gray-500">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p></div>
                             <div className="flex flex-col items-end gap-2">
                               <div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                              {p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100"><Download size={12}/> Facture PDF</button>}
+                              {p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>}
                             </div>
                           </div>
                         );
@@ -623,43 +500,22 @@ const AdminStudentsTab = () => {
   );
 };
 
-// --- INSCRIPTIONS MANUELLES ---
 const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
-  const [bookings, setBookings] = useState<BookingInfo[]>([]);
-  const [showAddManual, setShowAddManual] = useState(false);
-  const [newManualName, setNewManualName] = useState('');
-  const [newManualEmail, setNewManualEmail] = useState(''); 
-  const [newManualMethod, setNewManualMethod] = useState<PaymentMethod>('CASH');
+  const [bookings, setBookings] = useState<BookingInfo[]>([]); const [showAddManual, setShowAddManual] = useState(false);
+  const [newManualName, setNewManualName] = useState(''); const [newManualEmail, setNewManualEmail] = useState(''); const [newManualMethod, setNewManualMethod] = useState<PaymentMethod>('CASH');
 
-  useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, "bookings"), where("classId", "==", classInfo.id)), (snap) => setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))));
-    return () => unsub();
-  }, [classInfo.id]);
-
-  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
-    const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID'; const nowStr = new Date().toISOString();
-    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
-    syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: classInfo.price });
-  };
+  useEffect(() => { const unsub = onSnapshot(query(collection(db, "bookings"), where("classId", "==", classInfo.id)), (snap) => setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)))); return () => unsub(); }, [classInfo.id]);
+  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => { const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID'; const nowStr = new Date().toISOString(); await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }); syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: classInfo.price }); };
 
   const handleAddManual = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!newManualName) return; 
-    let manualId = 'manual_' + Date.now(); let finalName = newManualName + " (Manuel)";
-
+    e.preventDefault(); if (!newManualName) return; let manualId = 'manual_' + Date.now(); let finalName = newManualName + " (Manuel)";
     try {
-      if (newManualEmail) {
-        const userQuery = await getDocs(query(collection(db, "users"), where("email", "==", newManualEmail.trim().toLowerCase())));
-        if (!userQuery.empty) { manualId = userQuery.docs[0].id; finalName = userQuery.docs[0].data().displayName; } 
-        else { const newUserRef = await addDoc(collection(db, "users"), { email: newManualEmail.trim().toLowerCase(), displayName: newManualName, role: 'student', credits: 0, hasFilledForm: false }); manualId = newUserRef.id; finalName = newManualName; }
-      }
-
+      if (newManualEmail) { const userQuery = await getDocs(query(collection(db, "users"), where("email", "==", newManualEmail.trim().toLowerCase()))); if (!userQuery.empty) { manualId = userQuery.docs[0].id; finalName = userQuery.docs[0].data().displayName; } else { const newUserRef = await addDoc(collection(db, "users"), { email: newManualEmail.trim().toLowerCase(), displayName: newManualName, role: 'student', credits: 0, hasFilledForm: false }); manualId = newUserRef.id; finalName = newManualName; } }
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classInfo.id); const classDoc = await t.get(classRef); const cData = classDoc.data();
-        if(!cData || cData.attendeesCount >= cData.maxCapacity) throw "Cours Complet";
-        if ((cData.attendeeIds || []).includes(manualId)) throw "Cet élève est déjà inscrit !";
+        if(!cData || cData.attendeesCount >= cData.maxCapacity) throw "Cours Complet"; if ((cData.attendeeIds || []).includes(manualId)) throw "Cet élève est déjà inscrit !";
         t.update(classRef, { attendeesCount: cData.attendeesCount + 1, attendeeIds: [...(cData.attendeeIds || []), manualId] });
-        const dateStr = classInfo.startAt.toLocaleDateString('fr-FR'); const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-        const paymentStatus = newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING'; const nowStr = new Date().toISOString();
+        const dateStr = classInfo.startAt.toLocaleDateString('fr-FR'); const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const paymentStatus = newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING'; const nowStr = new Date().toISOString();
         t.set(doc(collection(db, "bookings")), { classId: classInfo.id, userId: manualId, userName: finalName, classTitle: classInfo.title, date: classInfo.startAt.toISOString(), dateStr, timeStr, location: classInfo.location, price: classInfo.price, paymentMethod: newManualMethod, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
       });
       syncToSheet({ type: 'BOOKING', classId: classInfo.id, classTitle: classInfo.title, date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), location: classInfo.location, capacity: classInfo.maxCapacity, studentId: manualId, studentName: `${finalName} (${newManualMethod})`, paymentStatus: newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING', price: classInfo.price });
@@ -672,10 +528,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
     try {
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classInfo.id); const classDoc = await t.get(classRef); const cData = classDoc.data(); if(!cData) return;
-        if (b.paymentMethod === 'CREDIT' && !b.userId.startsWith('manual_')) {
-          const userRef = doc(db, "users", b.userId); const userDoc = await t.get(userRef);
-          if (userDoc.exists()) { const u = userDoc.data() as UserProfile; if(u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); } }
-        }
+        if (b.paymentMethod === 'CREDIT' && !b.userId.startsWith('manual_')) { const userRef = doc(db, "users", b.userId); const userDoc = await t.get(userRef); if (userDoc.exists()) { const u = userDoc.data() as UserProfile; if(u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); } } }
         t.update(classRef, { attendeesCount: Math.max(0, cData.attendeesCount - 1), attendeeIds: (cData.attendeeIds || []).filter((id: string) => id !== b.userId) }); t.delete(doc(db, "bookings", b.id));
       });
       syncToSheet({ type: 'CANCEL', classId: classInfo.id, studentId: b.userId, classTitle: classInfo.title, date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR'), location: classInfo.location, studentName: `${b.userName} (${b.paymentMethod})`, price: classInfo.price, paymentStatus: b.paymentStatus });
@@ -685,126 +538,82 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, 
 
   return (
     <div className="mt-4 border-t border-gray-100 pt-4 space-y-3">
-      {bookings.length === 0 ? <div className="text-center text-gray-400 text-sm">Aucun inscrit.</div> : (
-        <div className="space-y-2">
-          {bookings.map(b => (
-            <div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left border border-gray-100">
-              <div className="flex-1"><span className="font-bold text-gray-700 block">{b.userName}</span><span className="text-xs text-gray-500">{b.paymentMethod}</span></div>
-              <div className="flex gap-2">
-                <button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>}</button>
-                <button onClick={() => handleRemoveStudent(b)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md"><Trash2 size={16}/></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="pt-3 border-t border-gray-200 mt-3">
-        {!showAddManual ? <button type="button" onClick={() => setShowAddManual(true)} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-sm flex justify-center gap-2"><UserPlus size={16}/> Ajouter manuellement</button> : (
-          <form onSubmit={handleAddManual} className="flex flex-col gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
-            <div className="flex gap-2">
-              <input value={newManualName} onChange={e=>setNewManualName(e.target.value)} placeholder="Nom complet..." className="flex-1 text-sm p-2 border rounded-lg outline-none" />
-              <select value={newManualMethod} onChange={e=>setNewManualMethod(e.target.value as PaymentMethod)} className="text-sm p-2 border rounded-lg bg-white outline-none"><option value="CASH">Espèces</option><option value="WERO_RIB">Virement</option><option value="CREDIT">Crédit</option></select>
-            </div>
-            <input type="email" value={newManualEmail} onChange={e=>setNewManualEmail(e.target.value)} placeholder="Email (Optionnel, pour lier au compte de l'élève)" className="w-full text-sm p-2 border rounded-lg outline-none focus:border-amber-500" />
-            <div className="flex gap-2 mt-1"><button type="button" onClick={() => setShowAddManual(false)} className="flex-1 py-2 text-sm font-bold bg-white border rounded-lg">Annuler</button><button type="submit" disabled={!newManualName || classInfo.attendeesCount >= classInfo.maxCapacity} className="flex-1 py-2 text-sm font-bold text-white bg-gray-800 rounded-lg disabled:opacity-50">Valider</button></div>
-          </form>
-        )}
-      </div>
+      {bookings.length === 0 ? <div className="text-center text-gray-400 text-sm">Aucun inscrit.</div> : (<div className="space-y-2">{bookings.map(b => (<div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg text-sm text-left border border-gray-100"><div className="flex-1"><span className="font-bold text-gray-700 block">{b.userName}</span><span className="text-xs text-gray-500">{b.paymentMethod}</span></div><div className="flex gap-2"><button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center gap-1 px-3 py-1.5 rounded-md font-bold ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>}</button><button onClick={() => handleRemoveStudent(b)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md"><Trash2 size={16}/></button></div></div>))}</div>)}
+      <div className="pt-3 border-t border-gray-200 mt-3">{!showAddManual ? <button type="button" onClick={() => setShowAddManual(true)} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-sm flex justify-center gap-2"><UserPlus size={16}/> Ajouter manuellement</button> : (<form onSubmit={handleAddManual} className="flex flex-col gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200"><div className="flex gap-2"><input value={newManualName} onChange={e=>setNewManualName(e.target.value)} placeholder="Nom complet..." className="flex-1 text-sm p-2 border rounded-lg outline-none" /><select value={newManualMethod} onChange={e=>setNewManualMethod(e.target.value as PaymentMethod)} className="text-sm p-2 border rounded-lg bg-white outline-none"><option value="CASH">Espèces</option><option value="WERO_RIB">Virement</option><option value="CREDIT">Crédit</option></select></div><input type="email" value={newManualEmail} onChange={e=>setNewManualEmail(e.target.value)} placeholder="Email (Optionnel, pour lier au compte de l'élève)" className="w-full text-sm p-2 border rounded-lg outline-none focus:border-amber-500" /><div className="flex gap-2 mt-1"><button type="button" onClick={() => setShowAddManual(false)} className="flex-1 py-2 text-sm font-bold bg-white border rounded-lg">Annuler</button><button type="submit" disabled={!newManualName || classInfo.attendeesCount >= classInfo.maxCapacity} className="flex-1 py-2 text-sm font-bold text-white bg-gray-800 rounded-lg disabled:opacity-50">Valider</button></div></form>)}</div>
     </div>
   );
 };
 
-// --- CARTE DU COURS (AVEC LIEN EXTERNE) ---
 const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const isFull = info.attendeesCount >= info.maxCapacity;
   const isProcessing = processingId === info.id; const canBook = userProfile?.hasFilledForm;
 
+  const cardStyle = info.color ? { borderColor: info.color, boxShadow: isBooked ? `0 0 0 4px ${info.color}30` : 'none' } : {};
+  const timeStyle = info.color ? { color: info.color, backgroundColor: `${info.color}15` } : {};
+  const btnStyle = info.color ? { backgroundColor: info.color, color: '#fff' } : {};
+
   return (
-    <div className={`bg-white p-5 rounded-2xl shadow-sm border relative flex flex-col justify-between text-left ${isBooked ? 'border-amber-400 ring-4 ring-amber-50' : 'border-gray-100'}`}>
-      {userProfile?.role === 'admin' && (
-        <div className="absolute top-3 right-3 flex gap-2">
-           <a href={generateGoogleCalendarLink(info.title, info.startAt, info.endAt, info.locationAddress || info.location, info.description || '')} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-indigo-500"><CalendarPlus size={18}/></a>
-           <button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500"><Edit2 size={18}/></button>
-           <button onClick={() => { if(confirm("Supprimer ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={18}/></button>
-        </div>
-      )}
+    <div style={cardStyle} className={`bg-white p-5 rounded-2xl shadow-sm border-2 relative flex flex-col justify-between text-left ${!info.color && isBooked ? 'border-amber-400 ring-4 ring-amber-50' : !info.color ? 'border-gray-100' : ''}`}>
+      {userProfile?.role === 'admin' && (<div className="absolute top-3 right-3 flex gap-2"><a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-indigo-500"><MapPin size={18}/></a><button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500"><Edit2 size={18}/></button><button onClick={() => { if(confirm("Supprimer ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={18}/></button></div>)}
       <div>
         <div className="flex justify-between items-start mb-4 pr-16 gap-2"><div><h3 className="font-bold text-xl text-gray-800 leading-tight mb-1">{info.title}</h3><p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p></div></div>
-        <div className="flex flex-col items-start mb-3"><div className="text-xl font-black text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl">{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 rounded-md">Tarif : {info.price}</span>}</div>
+        <div className="flex flex-col items-start mb-3"><div style={timeStyle} className={`text-xl font-black px-3 py-1.5 rounded-xl ${!info.color ? 'text-amber-600 bg-amber-50' : ''}`}>{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 rounded-md">Tarif : {info.price}</span>}</div>
         <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block">Prof : {info.instructor}</span>
         {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border">{info.description}</p>}
-        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className="flex gap-1.5 items-center hover:text-amber-600 underline"><MapPin size={16}/> {info.location}</a></div>
+        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className={`flex gap-1.5 items-center underline ${info.color ? '' : 'hover:text-amber-600'}`} style={info.color ? {color: info.color} : {}}><MapPin size={16}/> {info.location}</a></div>
       </div>
-
-      {info.externalLink ? (
-        <a href={info.externalLink} target="_blank" rel="noreferrer" className="w-full py-3.5 rounded-xl font-bold text-white bg-green-500 hover:bg-green-600 text-center block shadow-lg shadow-green-200 transition-colors">Réserver sur le site partenaire</a>
-      ) : isBooked ? (
-        <button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">Annuler ma réservation</button>
-      ) : (
-        <button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} className={`w-full py-3.5 rounded-xl font-bold text-white ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : 'bg-gradient-to-r from-amber-500 to-amber-600'}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>
-      )}
-
+      {info.externalLink ? (<a href={info.externalLink} target="_blank" rel="noreferrer" style={btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white text-center block shadow-lg transition-colors ${!info.color ? 'bg-green-500 hover:bg-green-600 shadow-green-200' : ''}`}>Réserver sur le site partenaire</a>) : isBooked ? (<button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 rounded-xl font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">Annuler ma réservation</button>) : (<button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} style={btnStyle} className={`w-full py-3.5 rounded-xl font-bold text-white ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : !info.color ? 'bg-gradient-to-r from-amber-500 to-amber-600' : ''}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>)}
       {userProfile?.role === 'admin' && !info.externalLink && <div className="mt-4"><button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 rounded-xl"><Users size={16}/> Inscrits {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button>{showAttendees && <AdminClassAttendees classInfo={info} onRefresh={onRefresh} />}</div>}
     </div>
   );
 };
 
-// --- FORMULAIRE DE COURS ---
 const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEdit }: { onAdd: () => void, locations: StudioLocation[], templates: ClassTemplate[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
-  const [isOpen, setIsOpen] = useState(false); const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: '', externalLink: ''});
-  useEffect(() => {
-    if (editClassData) { setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location, price: editClassData.price || '', externalLink: editClassData.externalLink || '' }); setIsOpen(true); } else { if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name})); }
-  }, [editClassData, locations]);
+  const [isOpen, setIsOpen] = useState(false); const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: '', externalLink: '', color: ''});
+  useEffect(() => { if (editClassData) { setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location, price: editClassData.price || '', externalLink: editClassData.externalLink || '', color: editClassData.color || '' }); setIsOpen(true); } else { if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name})); } }, [editClassData, locations]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!data.date || !data.title) return;
-    const locObj = locations.find(l => l.name === data.loc);
-    const payload = { title: data.title, description: data.desc, instructor: "Ali", location: data.loc, locationAddress: locObj ? locObj.address : '', price: data.price, startAt: Timestamp.fromDate(new Date(data.date)), endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), maxCapacity: Number(data.cap), externalLink: data.externalLink };
+    const locObj = locations.find(l => l.name === data.loc); const payload = { title: data.title, description: data.desc, instructor: "Ali", location: data.loc, locationAddress: locObj ? locObj.address : '', price: data.price, startAt: Timestamp.fromDate(new Date(data.date)), endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), maxCapacity: Number(data.cap), externalLink: data.externalLink, color: data.color };
     if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); else await addDoc(collection(db, "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
     setIsOpen(false); onCancelEdit(); onAdd();
   };
-  
   if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-8 border-2 border-dashed border-amber-300 text-amber-700 py-4 rounded-xl flex justify-center items-center gap-2 font-bold hover:bg-amber-50"><Plus/> Créer un nouveau cours</button>;
   return (
     <div className="bg-white p-6 rounded-2xl mb-8 border border-amber-100 shadow-sm relative text-left">
       <h3 className="font-bold text-amber-800 mb-4 text-lg">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
-      {!editClassData && templates.length > 0 && <select className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl font-bold outline-none" onChange={(e) => { const t = templates.find(x => x.id === e.target.value); if (t) setData({...data, title: t.title, loc: t.locationName, cap: t.maxCapacity, desc: t.description, price: t.price, externalLink: t.externalLink || '' }); }}><option value="">-- Charger un modèle --</option>{templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>}
+      {!editClassData && templates.length > 0 && <select className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl font-bold outline-none" onChange={(e) => { const t = templates.find(x => x.id === e.target.value); if (t) setData({...data, title: t.title, loc: t.locationName, cap: t.maxCapacity, desc: t.description, price: t.price, externalLink: t.externalLink || '', color: t.color || '' }); }}><option value="">-- Charger un modèle --</option>{templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Titre du cours *"/>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3"><input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border rounded-xl"/><select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border rounded-xl bg-white">{locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</select><input type="text" value={data.price} onChange={e=>setData({...data, price: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="Tarif"/><input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full p-3 border rounded-xl" placeholder="Places"/></div>
         <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border rounded-xl min-h-[100px]" placeholder="Description"/>
         <input value={data.externalLink} onChange={e=>setData({...data, externalLink: e.target.value})} className="w-full p-3 border border-green-200 bg-green-50 rounded-xl outline-none" placeholder="Lien de réservation externe (Optionnel)"/>
+        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+          <input type="color" value={data.color || '#f59e0b'} onChange={e=>setData({...data, color: e.target.value})} className="w-10 h-10 p-0 border-0 rounded cursor-pointer bg-transparent"/>
+          <span className="text-sm font-bold text-gray-700">Couleur de la carte personnalisée</span>
+          {data.color && <button type="button" onClick={()=>setData({...data, color: ''})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Retirer la couleur</button>}
+        </div>
         <div className="flex gap-3"><button type="button" onClick={()=>{setIsOpen(false); onCancelEdit();}} className="flex-1 py-3 bg-gray-100 rounded-xl font-bold">Annuler</button><button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold">Valider</button></div>
       </form>
     </div>
   );
 };
 
-// --- ONGLET : REGLAGES ET CONFIGURATION ---
 const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
-  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '' });
-  
-  const [remDays, setRemDays] = useState(globalSettings.reminderDays);
-  const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || '');
-  const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
-  const [welcomeTextSize, setWelcomeTextSize] = useState(globalSettings.welcomeTextSize || 18);
-  const [welcomeImageSize, setWelcomeImageSize] = useState(globalSettings.welcomeImageSize || 50);
+  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' });
+  const [remDays, setRemDays] = useState(globalSettings.reminderDays); const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || ''); const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
+  const [welcomeTextSize, setWelcomeTextSize] = useState(globalSettings.welcomeTextSize || 18); const [welcomeImageSize, setWelcomeImageSize] = useState(globalSettings.welcomeImageSize || 50);
   const [newPack, setNewPack] = useState({ name: '', price: 0, qty: 1, validityDays: 90 });
 
   const addLocation = async () => { if (!newLocName) return; let updatedList; if (editingLocId) { updatedList = locations.map((l:any) => l.id === editingLocId ? { ...l, name: newLocName, address: newLocAddress } : l); setEditingLocId(null); } else { updatedList = [...locations, { id: Date.now().toString(), name: newLocName, address: newLocAddress }]; } await setDoc(doc(db, "settings", "general"), { locations: updatedList }, { merge: true }); setNewLocName(''); setNewLocAddress(''); };
   const removeLocation = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { locations: locations.filter((l:any) => l.id !== id) }, { merge: true }); };
-  const addTemplate = async (e: React.FormEvent) => { e.preventDefault(); if (!newTpl.title) return; let updatedList; if (editingTplId) { updatedList = templates.map((t:any) => t.id === editingTplId ? { ...t, title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink } : t); setEditingTplId(null); } else { updatedList = [...templates, { id: Date.now().toString(), title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink }]; } await setDoc(doc(db, "settings", "general"), { templates: updatedList }, { merge: true }); setNewTpl({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '' }); };
+  const addTemplate = async (e: React.FormEvent) => { e.preventDefault(); if (!newTpl.title) return; let updatedList; if (editingTplId) { updatedList = templates.map((t:any) => t.id === editingTplId ? { ...t, title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color } : t); setEditingTplId(null); } else { updatedList = [...templates, { id: Date.now().toString(), title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color }]; } await setDoc(doc(db, "settings", "general"), { templates: updatedList }, { merge: true }); setNewTpl({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' }); };
   const removeTemplate = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { templates: templates.filter((t:any) => t.id !== id) }, { merge: true }); };
   const addPack = async (e: React.FormEvent) => { e.preventDefault(); if(!newPack.name) return; let updatedList; if (editingPackId) { updatedList = creditPacks.map((p:any) => p.id === editingPackId ? { ...p, ...newPack } : p); setEditingPackId(null); } else { updatedList = [...creditPacks, { id: Date.now().toString(), ...newPack }]; } await setDoc(doc(db, "settings", "general"), { creditPacks: updatedList }, { merge: true }); setNewPack({ name: '', price: 0, qty: 1, validityDays: 90 }); };
   const removePack = async (id: string) => { if(!confirm("Supprimer ce pack ?")) return; await setDoc(doc(db, "settings", "general"), { creditPacks: creditPacks.filter((p:any) => p.id !== id) }, { merge: true }); };
-  
-  const saveSettings = async () => { 
-    await setDoc(doc(db, "settings", "general"), { reminderDays: remDays, welcomeText, welcomeImageUrl: welcomeImage, welcomeTextSize, welcomeImageSize }, { merge: true }); 
-    alert("Enregistré !"); 
-  };
-
+  const saveSettings = async () => { await setDoc(doc(db, "settings", "general"), { reminderDays: remDays, welcomeText, welcomeImageUrl: welcomeImage, welcomeTextSize, welcomeImageSize }, { merge: true }); alert("Enregistré !"); };
   const exportFullBackup = async () => { try { let csv = "COLLECTION;ID;DONNEES\n"; const uSnap = await getDocs(collection(db, "users")); uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const cSnap = await getDocs(collection(db, "classes")); cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const bSnap = await getDocs(collection(db, "bookings")); bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch(e) { alert("Erreur."); } };
 
   return (
@@ -814,47 +623,22 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col justify-between gap-4"><div><p className="font-bold text-gray-800">Délai relances paiement</p><p className="text-sm text-gray-500">Jours après le cours avant apparition dans les retards.</p></div><div className="flex gap-2"><input type="number" value={remDays} onChange={e => setRemDays(Number(e.target.value))} className="p-2 border rounded-lg w-20 text-center font-bold outline-none"/><button onClick={saveSettings} className="bg-gray-800 text-white font-bold py-2 px-4 rounded-lg flex-1">Enregistrer délai</button></div></div>
           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 flex flex-col justify-between gap-4"><div><p className="font-bold text-indigo-900 flex items-center gap-2"><Database size={16}/> Sauvegarde des données (Backup)</p><p className="text-sm text-indigo-700">Téléchargez une copie d'urgence (CSV) de toutes vos données Firebase.</p></div><button onClick={exportFullBackup} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"><Download size={16}/> Sauvegarde Manuelle</button></div>
-          
-          {/* NOUVEAU BLOC ACCUEIL AVEC PREVISUALISATION */}
           <div className="bg-blue-50 p-5 rounded-xl border border-blue-200 md:col-span-2">
-            <div className="flex justify-between items-center mb-4">
-              <h4 className="font-bold text-blue-900 flex items-center gap-2"><Home size={18}/> Personnalisation de l'Accueil</h4>
-              <button onClick={saveSettings} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-colors">Mettre à jour l'accueil</button>
-            </div>
-            
+            <div className="flex justify-between items-center mb-4"><h4 className="font-bold text-blue-900 flex items-center gap-2"><Home size={18}/> Personnalisation de l'Accueil</h4><button onClick={saveSettings} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-colors">Mettre à jour l'accueil</button></div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Formulaire */}
               <div className="space-y-4">
                 <div><label className="text-sm font-bold text-blue-800">Texte de bienvenue</label><textarea value={welcomeText} onChange={e => setWelcomeText(e.target.value)} className="w-full p-3 border border-blue-100 rounded-xl mt-1 min-h-[120px] outline-none focus:border-blue-500" placeholder="Ex: Bienvenue sur notre espace..."></textarea></div>
-                <div><label className="text-sm font-bold text-blue-800">Lien de l'image (URL Postimages/Drive)</label><input type="text" value={welcomeImage} onChange={e => setWelcomeImage(e.target.value)} className="w-full p-3 border border-blue-100 rounded-xl mt-1 outline-none focus:border-blue-500" placeholder="Ex: https://postimg.cc/image.jpg" /></div>
-                
+                <div><label className="text-sm font-bold text-blue-800">Lien de l'image (URL Postimages)</label><input type="text" value={welcomeImage} onChange={e => setWelcomeImage(e.target.value)} className="w-full p-3 border border-blue-100 rounded-xl mt-1 outline-none focus:border-blue-500" placeholder="Ex: https://i.postimg.cc/image.jpg" /></div>
                 <div className="bg-white p-4 rounded-xl border border-blue-100 space-y-4 shadow-sm">
-                  <div>
-                    <label className="text-sm font-bold text-gray-700 flex justify-between">Taille du texte <span>{welcomeTextSize}px</span></label>
-                    <input type="range" min="12" max="36" value={welcomeTextSize} onChange={e => setWelcomeTextSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" />
-                  </div>
-                  <div>
-                    <label className="text-sm font-bold text-gray-700 flex justify-between">Proportion de l'image <span>{welcomeImageSize}%</span></label>
-                    <input type="range" min="20" max="80" value={welcomeImageSize} onChange={e => setWelcomeImageSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" disabled={!welcomeImage} />
-                  </div>
+                  <div><label className="text-sm font-bold text-gray-700 flex justify-between">Taille du texte <span>{welcomeTextSize}px</span></label><input type="range" min="12" max="36" value={welcomeTextSize} onChange={e => setWelcomeTextSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" /></div>
+                  <div><label className="text-sm font-bold text-gray-700 flex justify-between">Proportion de l'image <span>{welcomeImageSize}%</span></label><input type="range" min="20" max="80" value={welcomeImageSize} onChange={e => setWelcomeImageSize(Number(e.target.value))} className="w-full mt-2 accent-blue-600" disabled={!welcomeImage} /></div>
                 </div>
               </div>
-
-              {/* Prévisualisation en direct */}
               <div>
-                <label className="text-sm font-bold text-blue-800 mb-2 block">Aperçu en direct (Simulation) :</label>
-                <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden flex flex-col md:flex-row pointer-events-none scale-90 md:scale-100 origin-top h-full">
-                  {welcomeImage && (
-                    <div style={{ width: `${welcomeImageSize}%` }} className="bg-gray-100 border-b md:border-b-0 md:border-r border-gray-100">
-                      <img src={welcomeImage} alt="Preview" className="w-full h-full object-cover min-h-[150px]" />
-                    </div>
-                  )}
-                  <div style={{ width: welcomeImage ? `${100 - welcomeImageSize}%` : '100%' }} className="p-6 flex flex-col justify-center">
-                    <h2 className="text-xl font-black text-gray-900 mb-4">Bienvenue chez Vertic'Ali !</h2>
-                    <div className="text-gray-600 whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${welcomeTextSize}px` }}>
-                      {welcomeText || "Le texte apparaîtra ici..."}
-                    </div>
-                  </div>
+                <label className="text-sm font-bold text-blue-800 mb-2 block">Aperçu en direct :</label>
+                <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden flex flex-col md:flex-row pointer-events-none origin-top h-full">
+                  {welcomeImage && (<div style={{ width: `${welcomeImageSize}%` }} className="bg-gray-100 border-b md:border-b-0 md:border-r border-gray-100"><img src={welcomeImage} alt="Preview" className="w-full h-full object-cover min-h-[150px]" /></div>)}
+                  <div style={{ width: welcomeImage ? `${100 - welcomeImageSize}%` : '100%' }} className="p-6 flex flex-col justify-center"><h2 className="text-xl font-black text-gray-900 mb-4">Bienvenue chez Vertic'Ali !</h2><div className="text-gray-600 whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${welcomeTextSize}px` }}>{welcomeText || "Le texte apparaîtra ici..."}</div></div>
                 </div>
               </div>
             </div>
@@ -868,132 +652,62 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
         <form onSubmit={addTemplate} className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
           <input value={newTpl.title} onChange={e=>setNewTpl({...newTpl, title: e.target.value})} placeholder="Titre" className="p-2 border rounded-lg outline-none focus:border-amber-500"/>
           <select value={newTpl.loc} onChange={e=>setNewTpl({...newTpl, loc: e.target.value})} className="p-2 border rounded-lg bg-white outline-none focus:border-amber-500">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
-          <div className="flex gap-2">
-            <input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/>
-            <input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} placeholder="Capacité max" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/>
-          </div>
+          <div className="flex gap-2"><input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/><input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} placeholder="Capacité max" className="w-1/2 p-2 border rounded-lg outline-none focus:border-amber-500"/></div>
           <textarea value={newTpl.desc} onChange={e=>setNewTpl({...newTpl, desc: e.target.value})} placeholder="Description du cours (Optionnel)" className="p-2 border rounded-lg outline-none focus:border-amber-500 min-h-[80px]"/>
           <input value={newTpl.externalLink} onChange={e=>setNewTpl({...newTpl, externalLink: e.target.value})} placeholder="Lien externe (Optionnel)" className="p-2 border border-green-300 bg-green-50 rounded-lg outline-none focus:border-green-500"/>
-          <div className="flex gap-2 mt-2">
-            {editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:''});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}
-            <button type="submit" className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-lg transition-colors">{editingTplId ? 'Mettre à jour' : 'Créer le modèle'}</button>
+          <div className="flex items-center gap-3 mt-1 p-2">
+            <input type="color" value={newTpl.color || '#f59e0b'} onChange={e=>setNewTpl({...newTpl, color: e.target.value})} className="w-8 h-8 p-0 border-0 rounded cursor-pointer bg-transparent"/>
+            <span className="text-sm font-bold text-gray-700">Couleur du modèle</span>
+            {newTpl.color && <button type="button" onClick={()=>setNewTpl({...newTpl, color: ''})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Retirer la couleur</button>}
           </div>
+          <div className="flex gap-2 mt-2">{editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:'', color:''});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 rounded-lg">Annuler</button>}<button type="submit" className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-lg transition-colors">{editingTplId ? 'Mettre à jour' : 'Créer le modèle'}</button></div>
         </form>
-        <div className="space-y-2">
-          {templates.map((t:any) => (
-            <div key={t.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm">
-              <div><p className="font-bold text-sm">{t.title}</p></div>
-              <div className="flex gap-1">
-                <button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description || '', externalLink: t.externalLink || ''});}} className="text-amber-500 p-2"><Edit2 size={16}/></button>
-                <button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2"><Trash2 size={16}/></button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <div className="space-y-2">{templates.map((t:any) => (<div key={t.id} className="flex justify-between items-center bg-white p-3 rounded-lg border shadow-sm"><div><p className="font-bold text-sm flex items-center gap-2">{t.color && <span className="w-3 h-3 rounded-full" style={{backgroundColor: t.color}}></span>}{t.title}</p></div><div className="flex gap-1"><button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description || '', externalLink: t.externalLink || '', color: t.color || ''});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div>
       </div>
     </div>
   );
 };
 
-// --- MODALES INVISIBLES ---
-const BoutiqueModal = ({ isOpen, onClose, user, packs }: { isOpen: boolean, onClose: () => void, user: UserProfile, packs: CreditPackTemplate[] }) => {
+// --- MODALES ---
+const BoutiqueModal = ({ isOpen, onClose, user, packs }: any) => {
   if (!isOpen) return null; const activeCreds = getActiveCredits(user);
   const handleBuy = async (pack: CreditPackTemplate) => {
     if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ?`)) return;
-    try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement avec le motif 'Pack Credits + Ton Nom'."); onClose(); } catch (e) { alert("Erreur."); }
+    try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement."); onClose(); } catch (e) {}
   };
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
-        <h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides. Uniquement valables au Picardia !</p>
-        {packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map(p => (<div key={p.id} className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Commander</button></div></div>))}</div>)}
-        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Fermer</button>
-      </div>
-    </div>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative"><h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>{packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map((p:any) => (<div key={p.id} className="border border-gray-200 rounded-xl p-4 flex justify-between items-center bg-gray-50"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Acheter</button></div></div>))}</div>)}<button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Fermer</button></div></div>
   );
 };
+
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3><p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p>
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06********</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div>
-        <div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p></div><button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button>
-      </div>
-    </div>
-  );
+  if (!isOpen) return null; return (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200"><h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3><p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p><div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 space-y-4"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">06********</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div><div className="bg-amber-50 text-amber-800 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-amber-100"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p></div><button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Fermer</button></div></div>);
 };
+
 const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl"><h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3>
-        <div className="space-y-3"><button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-400'}`}><div className="flex items-center gap-3"><Zap size={20}/> <span className="font-bold">1 Crédit</span></div><span className="text-xs">Solde: {userCredits}</span></button><button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button><button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button></div>
-        <button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold rounded-xl hover:bg-gray-100 transition-colors">Annuler</button>
-      </div>
-    </div>
-  );
+  if (!isOpen) return null; return (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl"><h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Paiement</h3><div className="space-y-3"><button onClick={() => onConfirm('CREDIT')} disabled={userCredits < 1} className={`w-full p-4 rounded-xl border-2 flex justify-between items-center ${userCredits >= 1 ? 'border-amber-100 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-400'}`}><div className="flex items-center gap-3"><Zap size={20}/> <span className="font-bold">1 Crédit</span></div><span className="text-xs">Solde: {userCredits}</span></button><button onClick={() => onConfirm('CASH')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-green-50 text-gray-700 flex gap-3"><span className="font-bold">Espèces (Sur place)</span></button><button onClick={() => onConfirm('WERO_RIB')} className="w-full p-4 rounded-xl border-2 border-gray-100 hover:bg-blue-50 text-gray-700 flex gap-3"><span className="font-bold">Virement / Wero</span></button></div><button onClick={onClose} className="mt-6 w-full py-3 text-gray-500 font-bold rounded-xl hover:bg-gray-100 transition-colors">Annuler</button></div></div>);
 };
 
 const UserProfileForm = ({ user, onClose }: any) => {
   const isFirstTime = !user.hasFilledForm;
   const [formData, setFormData] = useState({ birthDate: user.birthDate || '', street: user.street || '', zipCode: user.zipCode || '', city: user.city || '', phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || '' });
-  const [health1, setHealth1] = useState(false); const [health2, setHealth2] = useState(false); const [health3, setHealth3] = useState(false);
-  const [imageRights, setImageRights] = useState<'yes' | 'no' | null>(user.imageRights || null);
-  const [saving, setSaving] = useState(false);
+  const [health1, setHealth1] = useState(false); const [health2, setHealth2] = useState(false); const [health3, setHealth3] = useState(false); const [imageRights, setImageRights] = useState<'yes' | 'no' | null>(user.imageRights || null); const [saving, setSaving] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault(); 
-    if (isFirstTime) { if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); }
-    setSaving(true);
-    try {
-      await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true });
-      await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, adminMemo: user.adminMemo || '', ...formData });
-      if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅");
-      onClose();
-    } catch (e) { alert("Erreur."); }
-    setSaving(false);
+    e.preventDefault(); if (isFirstTime) { if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); }
+    setSaving(true); try { await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true }); await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, adminMemo: user.adminMemo || '', ...formData }); if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅"); onClose(); } catch (e) { alert("Erreur."); } setSaving(false);
   };
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left">
-      <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative">
-        <h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>
-        {isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}
-        <form onSubmit={handleSave} className="space-y-4 mt-4">
-          <div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500 border"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div>
-          <div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Coordonnées</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-amber-500" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl outline-none focus:border-amber-500" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl outline-none focus:border-amber-500" /></div></div>
-          <div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /></div>
-          {isFirstTime && (
-            <div className="mt-6 pt-6 border-t space-y-5">
-              <div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div>
-              <div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div>
-            </div>
-          )}
-          <div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold rounded-xl">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-xl shadow-lg disabled:opacity-50">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div>
-        </form>
-      </div>
-    </div>
-  );
+  return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 rounded-xl mb-4 text-sm text-gray-500 border"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Coordonnées</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border rounded-xl outline-none focus:border-amber-500" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-amber-500" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border rounded-xl outline-none focus:border-amber-500" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border rounded-xl outline-none focus:border-amber-500" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:border-red-500" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold rounded-xl">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-xl shadow-lg disabled:opacity-50">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
 };
 
-// --- ECRAN DE CONNEXION / INSCRIPTION ---
 const LoginScreen = () => {
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState(''); const [lastName, setLastName] = useState('');
-  const [error, setError] = useState(''); const [msg, setMsg] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(''); const [msg, setMsg] = useState(''); const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setMsg(''); setLoading(true);
-    try { await signInWithEmailAndPassword(auth, email, password); }
-    catch (err) { setError('Email ou mot de passe incorrect.'); setLoading(false); }
-  };
-
-const handleRegister = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setError(''); setMsg(''); setLoading(true); try { await signInWithEmailAndPassword(auth, email, password); } catch (err) { setError('Email ou mot de passe incorrect.'); setLoading(false); } };
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault(); setError(''); setMsg(''); setLoading(true);
     if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
     if (!firstName || !lastName) { setError('Veuillez renseigner votre nom et prénom.'); setLoading(false); return; }
@@ -1001,103 +715,22 @@ const handleRegister = async (e: React.FormEvent) => {
     
     const domain = email.trim().toLowerCase().split('@')[1];
     const forbiddenDomains = ['yopmail.com', 'yopmail.fr', 'tempmail.com', '10minutemail.com', 'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'jetable.org'];
-    
-    try {
-      // Vérification API anti-jetable
-      const res = await fetch('https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf');
-      const text = await res.text();
-      if (text.includes(domain) || forbiddenDomains.includes(domain)) {
-         setError("⚠️ Les adresses email jetables ou temporaires sont interdites.");
-         setLoading(false); return;
-      }
-    } catch (err) {
-      if (forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ne sont pas autorisées."); setLoading(false); return; }
-    }
+    try { const res = await fetch('https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'); const text = await res.text(); if (text.includes(domain) || forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ou temporaires sont interdites."); setLoading(false); return; } } catch (err) { if (forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ne sont pas autorisées."); setLoading(false); return; } }
 
-    try {
-      const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
-      const fullName = `${firstName.trim()} ${lastName.trim()}`;
-      await updateProfile(userCred.user, { displayName: fullName });
-      await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName, email: email.trim().toLowerCase(), role: 'student', credits: 0, hasFilledForm: false }, { merge: true });
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.'); else setError('Erreur lors de la création du compte.');
-      setLoading(false);
-    }
+    try { const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password); const fullName = `${firstName.trim()} ${lastName.trim()}`; await updateProfile(userCred.user, { displayName: fullName }); await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName, email: email.trim().toLowerCase(), role: 'student', credits: 0, hasFilledForm: false }, { merge: true }); } catch (err: any) { if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.'); else setError('Erreur lors de la création du compte.'); setLoading(false); }
   };
+  const handleReset = async (e: React.FormEvent) => { e.preventDefault(); setError(''); setMsg(''); setLoading(true); try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien envoyé par email (Vérifiez vos spams).'); } catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); } setLoading(false); };
 
-  const handleReset = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setMsg(''); setLoading(true);
-    try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien envoyé par email (Vérifiez vos spams).'); }
-    catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); }
-    setLoading(false);
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
-        <div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div>
-        <h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>
-        {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}
-        {msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}
-
-        {mode === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" />
-            <input type="password" required placeholder="Mot de passe" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" />
-            <button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Se connecter</button>
-            <div className="flex justify-between items-center text-sm mt-4 px-1">
-              <button type="button" onClick={() => {setMode('reset'); setError(''); setMsg('');}} className="text-gray-500 hover:text-amber-600 font-medium">Mot de passe oublié ?</button>
-              <button type="button" onClick={() => {setMode('register'); setError(''); setMsg('');}} className="text-amber-600 font-bold hover:text-amber-700">Créer un compte</button>
-            </div>
-          </form>
-        )}
-
-        {mode === 'register' && (
-          <form onSubmit={handleRegister} className="space-y-3">
-            <div className="flex gap-2">
-              <input type="text" required placeholder="Prénom" value={firstName} onChange={e=>setFirstName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-              <input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            </div>
-            <input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            <input type="password" required placeholder="Mot de passe (min 6 car.)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            <input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            <button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-50 mt-2 transition-colors">Créer mon compte</button>
-            <button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button>
-          </form>
-        )}
-
-        {mode === 'reset' && (
-          <form onSubmit={handleReset} className="space-y-4">
-            <p className="text-sm text-gray-600 mb-4 font-medium">Entrez votre email pour recevoir un lien de réinitialisation.</p>
-            <input type="email" required placeholder="Votre Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" />
-            <button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Envoyer le lien</button>
-            <button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Retour à la connexion</button>
-          </form>
-        )}
-
-        <div className="mt-8 pt-6 border-t border-gray-100">
-          <button type="button" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm">
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> 
-            {mode === 'register' ? 'S\'inscrire avec Google' : 'Continuer avec Google'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return (<div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4"><div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center"><div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div><h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>{error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}{msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}{mode === 'login' && (<form onSubmit={handleLogin} className="space-y-4"><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" /><input type="password" required placeholder="Mot de passe" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500 transition-colors" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Se connecter</button><div className="flex justify-between items-center text-sm mt-4 px-1"><button type="button" onClick={() => {setMode('reset'); setError(''); setMsg('');}} className="text-gray-500 hover:text-amber-600 font-medium">Mot de passe oublié ?</button><button type="button" onClick={() => {setMode('register'); setError(''); setMsg('');}} className="text-amber-600 font-bold hover:text-amber-700">Créer un compte</button></div></form>)}{mode === 'register' && (<form onSubmit={handleRegister} className="space-y-3"><div className="flex gap-2"><input type="text" required placeholder="Prénom" value={firstName} onChange={e=>setFirstName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /><input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /></div><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /><input type="password" required placeholder="Mot de passe (min 6 car.)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /><input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-600 disabled:opacity-50 mt-2 transition-colors">Créer mon compte</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button></form>)}{mode === 'reset' && (<form onSubmit={handleReset} className="space-y-4"><p className="text-sm text-gray-600 mb-4 font-medium">Entrez votre email pour recevoir un lien de réinitialisation.</p><input type="email" required placeholder="Votre Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-amber-500" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors">Envoyer le lien</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Retour à la connexion</button></form>)}<div className="mt-8 pt-6 border-t border-gray-100"><button type="button" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-sm"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> {mode === 'register' ? 'S\'inscrire avec Google' : 'Continuer avec Google'}</button></div></div></div>);
 };
 
-
-// --- APP PRINCIPALE ---
 export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'accueil'|'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
-  
-  const [allPurchases, setAllPurchases] = useState<CreditPurchase[]>([]);
-  const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
-  
+  const [allPurchases, setAllPurchases] = useState<CreditPurchase[]>([]); const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
   const [myBookings, setMyBookings] = useState<BookingInfo[]>([]); const [myPurchases, setMyPurchases] = useState<CreditPurchase[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]); const [showNotifications, setShowNotifications] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null); const [showProfile, setShowProfile] = useState(false);
@@ -1109,17 +742,7 @@ export default function App() {
   const [hasInvoiceAlert, setHasInvoiceAlert] = useState(false);
 
   useEffect(() => {
-    if (userProfile?.role === 'admin') {
-      const now = new Date().getTime();
-      const alert = allBookings.some(b => {
-        if (b.paymentMethod === 'CREDIT') return false;
-        const isPast = new Date(b.date).getTime() < now;
-        if (b.paymentStatus === 'PENDING' && isPast) return true;
-        if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true;
-        return false;
-      }) || allPurchases.some(p => p.status === 'PENDING');
-      setHasInvoiceAlert(alert);
-    }
+    if (userProfile?.role === 'admin') { const now = new Date().getTime(); const alert = allBookings.some(b => { if (b.paymentMethod === 'CREDIT') return false; const isPast = new Date(b.date).getTime() < now; if (b.paymentStatus === 'PENDING' && isPast) return true; if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; return false; }) || allPurchases.some(p => p.status === 'PENDING'); setHasInvoiceAlert(alert); }
   }, [allPurchases, allBookings, userProfile]);
 
   useEffect(() => {
@@ -1128,27 +751,21 @@ export default function App() {
       if (user) {
         const userRef = doc(db, "users", user.uid);
         onSnapshot(userRef, async (snap) => {
-          if (snap.exists()) {
-             setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
-          } else {
-             const emailQ = query(collection(db, "users"), where("email", "==", user.email));
-             const emailSnap = await getDocs(emailQ);
+          if (snap.exists()) { setUserProfile({ id: snap.id, ...snap.data() } as UserProfile); } else {
+             const emailQ = query(collection(db, "users"), where("email", "==", user.email)); const emailSnap = await getDocs(emailQ);
              if (!emailSnap.empty) {
                 const oldDoc = emailSnap.docs[0]; const oldData = oldDoc.data();
-                await setDoc(userRef, { ...oldData, id: user.uid, displayName: user.displayName });
-                await deleteDoc(doc(db, "users", oldDoc.id));
+                await setDoc(userRef, { ...oldData, id: user.uid, displayName: user.displayName }); await deleteDoc(doc(db, "users", oldDoc.id));
                 const bQ = await getDocs(query(collection(db, "bookings"), where("userId", "==", oldDoc.id))); bQ.forEach(b => updateDoc(doc(db, "bookings", b.id), { userId: user.uid }));
                 const pQ = await getDocs(query(collection(db, "credit_purchases"), where("userId", "==", oldDoc.id))); pQ.forEach(p => updateDoc(doc(db, "credit_purchases", p.id), { userId: user.uid }));
              } else {
-                const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false };
-                setDoc(userRef, newUser); syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
+                const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false }; setDoc(userRef, newUser); syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
              }
           }
         });
       } else setUserProfile(null);
       setAuthLoading(false);
-    });
-    return () => unsub();
+    }); return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -1157,11 +774,7 @@ export default function App() {
        let isInitialLoad = true;
        const notifUnsub = onSnapshot(query(collection(db, "notifications"), orderBy("date", "desc"), limit(20)), (nsnap) => {
           setNotifications(nsnap.docs.map(d => ({id: d.id, ...d.data()} as AppNotification)));
-          if (!isInitialLoad && "Notification" in window && Notification.permission === "granted") {
-             nsnap.docChanges().forEach((change) => {
-                if (change.type === "added") { const data = change.doc.data(); if (Date.now() - new Date(data.date).getTime() < 120000) new Notification("Vertic'Ali", { body: data.text, icon: "/logo.png" }); }
-             });
-          }
+          if (!isInitialLoad && "Notification" in window && Notification.permission === "granted") { nsnap.docChanges().forEach((change) => { if (change.type === "added") { const data = change.doc.data(); if (Date.now() - new Date(data.date).getTime() < 120000) new Notification("Vertic'Ali", { body: data.text, icon: "/logo.png" }); } }); }
           isInitialLoad = false;
        });
        const unsubP = onSnapshot(query(collection(db, "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
@@ -1170,102 +783,48 @@ export default function App() {
     }
   }, [userProfile?.role]);
 
-  const fetchAllData = async () => {
-    const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc")));
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass));
-    const now = new Date(); setClasses(all.filter(c => c.endAt && c.endAt > now)); setPastClasses(all.filter(c => c.endAt && c.endAt <= now).reverse()); 
-  };
-
-  useEffect(() => {
-    fetchAllData();
-    onSnapshot(doc(db, "settings", "general"), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); 
-        setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 });
-      } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' });
-    });
-  }, []);
-
-  useEffect(() => {
-    if (userProfile) {
-      const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", userProfile.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); });
-      const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", userProfile.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); });
-      return () => { unsubBookings(); unsubPurchases(); };
-    }
-  }, [userProfile]);
+  const fetchAllData = async () => { const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); const now = new Date(); setClasses(all.filter(c => c.endAt && c.endAt > now)); setPastClasses(all.filter(c => c.endAt && c.endAt <= now).reverse()); };
+  useEffect(() => { fetchAllData(); onSnapshot(doc(db, "settings", "general"), (docSnap) => { if (docSnap.exists()) { const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); }); }, []);
+  useEffect(() => { if (userProfile) { const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", userProfile.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", userProfile.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [userProfile]);
 
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
-
   const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
   const confirmBooking = async (method: PaymentMethod) => {
-    const classId = paymentModal.classId; if (!classId || !userProfile) return;
-    setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
+    const classId = paymentModal.classId; if (!classId || !userProfile) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
     try {
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
-        const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
-        if (!classData || !userData) throw "Erreur DB";
-        if ((classData.attendeeIds || []).includes(userProfile.id)) throw "Déjà inscrit !";
-        if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
+        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        if (!classData || !userData) throw "Erreur DB"; if ((classData.attendeeIds || []).includes(userProfile.id)) throw "Déjà inscrit !"; if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
         let newPacks = userData.creditPacks ? [...userData.creditPacks] : [];
-        if (method === 'CREDIT') {
-          const now = new Date().getTime();
-          newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime());
-          const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !";
-          validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks });
-        }
+        if (method === 'CREDIT') { const now = new Date().getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
         t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...(classData.attendeeIds||[]), userProfile.id] });
         const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING'; const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR'); const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const nowStr = new Date().toISOString();
         t.set(doc(collection(db, "bookings")), { classId, userId: userProfile.id, userName: userProfile.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
         return { classTarget: { id: classId, ...classData, startAt: classData.startAt.toDate(), endAt: classData.endAt.toDate() } as DanceClass, dateStr, timeStr, method, paymentStatus };
-      }).then((d) => {
-        syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' });
-        sendNotification(`Nouvelle réservation : ${userProfile.displayName} pour ${d.classTarget.title}`, 'BOOKING');
-        setBookingSuccessData(d.classTarget); fetchAllData();
-      });
-    } catch (e) { alert("Erreur: " + e); }
-    setProcessingId(null);
+      }).then((d) => { syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); sendNotification(`Nouvelle réservation : ${userProfile.displayName} pour ${d.classTarget.title}`, 'BOOKING'); setBookingSuccessData(d.classTarget); fetchAllData(); });
+    } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
-
   const handleCancel = async (classId: string) => {
-    if (!userProfile || !window.confirm("Annuler ta réservation ?")) return;
-    setProcessingId(classId);
+    if (!userProfile || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
     try {
-      const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", userProfile.id));
-      const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
+      const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", userProfile.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus; }
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id);
-        const classDoc = await t.get(classRef); const userDoc = await t.get(userRef);
-        const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
-        if (!classData || !userData) throw "Erreur DB";
-        if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { const updatedPacks = [...userData.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); }
-        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== userProfile.id) });
-        if (bookingId) t.delete(doc(db, "bookings", bookingId));
+        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        if (!classData || !userData) throw "Erreur DB"; if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { const updatedPacks = [...userData.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); }
+        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== userProfile.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
       const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
-      if(cTarget) {
-         syncToSheet({ type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus });
-         sendNotification(`Annulation : ${userProfile.displayName} a annulé ${cTarget.title}`, 'CANCEL');
-      }
+      if(cTarget) { syncToSheet({ type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); sendNotification(`Annulation : ${userProfile.displayName} a annulé ${cTarget.title}`, 'CANCEL'); }
       alert("Réservation annulée !"); fetchAllData();
-    } catch (e) { alert("Erreur: " + e); }
-    setProcessingId(null);
+    } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
-  
-const handleCancelBoutiqueOrder = async (id: string) => {
-    if (!window.confirm("Es-tu sûre de vouloir annuler cette commande ?")) return;
-    try { await deleteDoc(doc(db, "credit_purchases", id)); alert("Commande annulée !"); } catch(e) { alert("Erreur."); }
-  };
-  
+  const handleCancelBoutiqueOrder = async (id: string) => { if (!window.confirm("Es-tu sûre de vouloir annuler cette commande ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); alert("Commande annulée !"); } catch(e) { alert("Erreur."); } };
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return <LoginScreen />;
-
-  const activeCreds = userProfile ? getActiveCredits(userProfile) : 0;
-  const unreadNotifs = notifications.filter(n => !n.read).length;
+  const activeCreds = userProfile ? getActiveCredits(userProfile) : 0; const unreadNotifs = notifications.filter(n => !n.read).length;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans pb-32 text-left w-full">
@@ -1286,20 +845,12 @@ const handleCancelBoutiqueOrder = async (id: string) => {
             {userProfile?.role === 'admin' && (
               <div className="relative">
                 <button onClick={() => setShowNotifications(!showNotifications)} className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm hover:bg-gray-50 relative"><Bell size={20} className="text-gray-600"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
-                {showNotifications && (
-                  <div className="absolute top-14 left-0 sm:left-auto sm:right-0 w-80 max-w-[90vw] bg-white shadow-2xl border border-gray-200 rounded-2xl z-50 overflow-hidden"><div className="p-3 bg-gray-50 border-b font-bold text-gray-800">Notifications</div><div className="max-h-64 overflow-y-auto">{notifications.length === 0 ? <p className="p-4 text-center text-sm text-gray-500">Aucune notification.</p> : notifications.map(n => (<div key={n.id} onClick={() => markNotifRead(n.id)} className={`p-3 border-b text-sm cursor-pointer ${n.read ? 'text-gray-500 bg-white' : 'text-gray-900 bg-blue-50 font-medium'}`}><p>{n.text}</p><span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleString('fr-FR')}</span></div>))}</div></div>
-                )}
+                {showNotifications && (<div className="absolute top-14 left-0 sm:left-auto sm:right-0 w-80 max-w-[90vw] bg-white shadow-2xl border border-gray-200 rounded-2xl z-50 overflow-hidden"><div className="p-3 bg-gray-50 border-b font-bold text-gray-800">Notifications</div><div className="max-h-64 overflow-y-auto">{notifications.length === 0 ? <p className="p-4 text-center text-sm text-gray-500">Aucune notification.</p> : notifications.map(n => (<div key={n.id} onClick={() => markNotifRead(n.id)} className={`p-3 border-b text-sm cursor-pointer ${n.read ? 'text-gray-500 bg-white' : 'text-gray-900 bg-blue-50 font-medium'}`}><p>{n.text}</p><span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleString('fr-FR')}</span></div>))}</div></div>)}
               </div>
             )}
-            <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm hover:bg-pink-50 text-pink-600 transition-colors" title="Instagram Vertic'Ali">
-              <Instagram size={20}/>
-            </a>
-            <div className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl shadow-sm text-lg font-black text-amber-700 flex gap-2 items-center cursor-default select-none">
-              <Zap size={20} className="fill-amber-600" /> {activeCreds}
-            </div>
-            <button onClick={() => setBoutiqueOpen(true)} className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl shadow-md text-sm font-bold flex gap-2 items-center transition-colors">
-              <ShoppingBag size={18} /> Boutique
-            </button>
+            <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm hover:bg-pink-50 text-pink-600 transition-colors" title="Instagram Vertic'Ali"><Instagram size={20}/></a>
+            <div className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl shadow-sm text-lg font-black text-amber-700 flex gap-2 items-center cursor-default select-none"><Zap size={20} className="fill-amber-600" /> {activeCreds}</div>
+            <button onClick={() => setBoutiqueOpen(true)} className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl shadow-md text-sm font-bold flex gap-2 items-center transition-colors"><ShoppingBag size={18} /> Boutique</button>
           </div>
         </header>
 
@@ -1315,82 +866,35 @@ const handleCancelBoutiqueOrder = async (id: string) => {
           <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={18}/> Planning</button>
           <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:bg-gray-50'}`}><History size={18}/> Mon Historique</button>
           {userProfile?.role === 'admin' && (
-            <>
-              <div className="w-px bg-gray-200 my-2 mx-2"></div>
-              <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700' : 'text-gray-500'}`}><LayoutDashboard size={18}/> Tableau de Bord</button>
-              <button onClick={() => setActiveTab('admin_invoices')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500'}`}><FileText size={18}/> Factures & Boutique</button>
-              <button onClick={() => setActiveTab('admin_students')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_students' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Users size={18}/> Tous les Élèves</button>
-              <button onClick={() => setActiveTab('admin_past')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_past' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Archive size={18}/> Cours Passés</button>
-              <button onClick={() => setActiveTab('admin_settings')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Settings size={18}/> Réglages</button>
-            </>
+            <><div className="w-px bg-gray-200 my-2 mx-2"></div><button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700' : 'text-gray-500'}`}><LayoutDashboard size={18}/> Tableau de Bord</button><button onClick={() => setActiveTab('admin_invoices')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500'}`}><FileText size={18}/> Factures & Boutique</button><button onClick={() => setActiveTab('admin_students')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_students' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Users size={18}/> Tous les Élèves</button><button onClick={() => setActiveTab('admin_past')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_past' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Archive size={18}/> Cours Passés</button><button onClick={() => setActiveTab('admin_settings')} className={`flex gap-2 px-6 py-3 rounded-xl font-bold whitespace-nowrap ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white' : 'text-gray-500'}`}><Settings size={18}/> Réglages</button></>
           )}
         </nav>
 
         {activeTab === 'accueil' && (
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row mb-8">
-            {globalSettings.welcomeImageUrl && (
-              <div style={{ width: window.innerWidth > 768 ? `${globalSettings.welcomeImageSize || 50}%` : '100%' }} className="min-h-[300px] bg-gray-50 border-b md:border-b-0 md:border-r border-gray-100">
-                <img src={globalSettings.welcomeImageUrl} alt="Accueil" className="w-full h-full object-cover" />
-              </div>
-            )}
-            <div style={{ width: (globalSettings.welcomeImageUrl && window.innerWidth > 768) ? `${100 - (globalSettings.welcomeImageSize || 50)}%` : '100%' }} className="p-8 md:p-12 flex flex-col justify-center">
-              <h2 className="text-3xl font-black text-gray-900 mb-6">Bienvenue chez Vertic'Ali !</h2>
-              <div className="text-gray-600 whitespace-pre-wrap leading-relaxed mb-8" style={{ fontSize: `${globalSettings.welcomeTextSize || 18}px` }}>
-                {globalSettings.welcomeText || "Bienvenue sur votre espace de réservation. Consultez le planning pour réserver vos prochaines séances !"}
-              </div>
-              <button onClick={() => setActiveTab('planning')} className="px-8 py-4 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl shadow-lg w-fit flex items-center gap-2 transition-colors">
-                <Calendar size={20}/> Voir le planning
-              </button>
-            </div>
+            {globalSettings.welcomeImageUrl && (<div style={{ width: window.innerWidth > 768 ? `${globalSettings.welcomeImageSize || 50}%` : '100%' }} className="min-h-[300px] bg-gray-50 border-b md:border-b-0 md:border-r border-gray-100"><img src={globalSettings.welcomeImageUrl} alt="Accueil" className="w-full h-full object-cover" /></div>)}
+            <div style={{ width: (globalSettings.welcomeImageUrl && window.innerWidth > 768) ? `${100 - (globalSettings.welcomeImageSize || 50)}%` : '100%' }} className="p-8 md:p-12 flex flex-col justify-center"><h2 className="text-3xl font-black text-gray-900 mb-6">Bienvenue chez Vertic'Ali !</h2><div className="text-gray-600 whitespace-pre-wrap leading-relaxed mb-8" style={{ fontSize: `${globalSettings.welcomeTextSize || 18}px` }}>{globalSettings.welcomeText || "Bienvenue sur votre espace de réservation. Consultez le planning pour réserver vos prochaines séances !"}</div><button onClick={() => setActiveTab('planning')} className="px-8 py-4 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl shadow-lg w-fit flex items-center gap-2 transition-colors"><Calendar size={20}/> Voir le planning</button></div>
           </div>
         )}
 
         {activeTab === 'planning' && (
           <div>
             {userProfile?.role === 'admin' && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
-            {classes.length === 0 ? ( <div className="bg-white rounded-2xl p-10 text-center text-gray-400">Aucun cours à venir.</div> ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">
-                {classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} onRefresh={fetchAllData} />)}
-              </div>
-            )}
+            {classes.length === 0 ? ( <div className="bg-white rounded-2xl p-10 text-center text-gray-400">Aucun cours à venir.</div> ) : (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">{classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} onRefresh={fetchAllData} />)}</div>)}
           </div>
         )}
 
-{activeTab === 'history' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl text-left">
-            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-amber-600"/> Mon Historique & Achats</h2>
+        {activeTab === 'history' && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl text-left"><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-amber-600"/> Mon Historique & Achats</h2>
             {userTimeline.length === 0 ? <p className="text-gray-500">Aucun historique pour le moment.</p> : (
               <div className="space-y-4">
                 {userTimeline.map((item, idx) => {
                   if (item.type === 'BOOKING') {
                     const b = item.data as BookingInfo;
-                    return (
-                      <div key={`hist-b-${b.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow">
-                        <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-700">COURS</span><h3 className="font-bold text-gray-800">{b.classTitle}</h3></div><p className="text-sm text-gray-500 capitalize">{new Date(b.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'})}</p></div>
-                        <div className="text-right flex flex-col items-end gap-2">
-                          <div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">Via {b.paymentMethod}</span><span className={`text-xs font-bold px-2 py-1 rounded-md ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                          {b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && (
-                            <button onClick={async () => { await generateInvoicePDF(b, userProfile, { title: b.classTitle, startAt: new Date(b.date), price: b.price }); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors"><Download size={14}/> Ma facture</button>
-                          )}
-                        </div>
-                      </div>
-                    );
+                    return (<div key={`hist-b-${b.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-700">COURS</span><h3 className="font-bold text-gray-800">{b.classTitle}</h3></div><p className="text-sm text-gray-500 capitalize">{new Date(b.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'})}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">Via {b.paymentMethod}</span><span className={`text-xs font-bold px-2 py-1 rounded-md ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && (<button onClick={async () => { await generateInvoicePDF(b, userProfile, { title: b.classTitle, startAt: new Date(b.date), price: b.price }); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors"><Download size={14}/> Ma facture</button>)}</div></div>);
                   } else {
-                    const p = item.data as CreditPurchase;
-                    const expiryDate = new Date(p.date); expiryDate.setDate(expiryDate.getDate() + p.validityDays);
-                    return (
-                      <div key={`hist-p-${p.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-amber-200 bg-amber-50 shadow-sm hover:shadow-md transition-shadow">
-                        <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-900">BOUTIQUE</span><h3 className="font-bold text-gray-800">{p.packName}</h3></div><p className="text-sm text-gray-600">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p><p className="text-xs text-amber-700 font-medium mt-0.5">Valide jusqu'au {expiryDate.toLocaleDateString('fr-FR')}</p></div>
-                        <div className="text-right flex flex-col items-end gap-2">
-                          <div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-xs font-bold px-2 py-1 rounded-md ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                          {p.status === 'PAID' ? (
-                            <button onClick={() => generatePackInvoicePDF(p, userProfile)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>
-                          ) : (
-                            <button onClick={() => handleCancelBoutiqueOrder(p.id)} className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded hover:bg-red-100 transition-colors"><Trash2 size={12}/> Annuler la commande</button>
-                          )}
-                        </div>
-                      </div>
-                    );
+                    const p = item.data as CreditPurchase; const expiryDate = new Date(p.date); expiryDate.setDate(expiryDate.getDate() + p.validityDays);
+                    return (<div key={`hist-p-${p.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-amber-200 bg-amber-50 shadow-sm hover:shadow-md transition-shadow"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-900">BOUTIQUE</span><h3 className="font-bold text-gray-800">{p.packName}</h3></div><p className="text-sm text-gray-600">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p><p className="text-xs text-amber-700 font-medium mt-0.5">Valide jusqu'au {expiryDate.toLocaleDateString('fr-FR')}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-xs font-bold px-2 py-1 rounded-md ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' ? (<button onClick={() => generatePackInvoicePDF(p, userProfile)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>) : (<button onClick={() => handleCancelBoutiqueOrder(p.id)} className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded hover:bg-red-100 transition-colors"><Trash2 size={12}/> Annuler la commande</button>)}</div></div>);
                   }
                 })}
               </div>
@@ -1401,14 +905,7 @@ const handleCancelBoutiqueOrder = async (id: string) => {
         {activeTab === 'admin_dashboard' && userProfile?.role === 'admin' && <AdminDashboardTab reminderDays={globalSettings.reminderDays} />}
         {activeTab === 'admin_invoices' && userProfile?.role === 'admin' && <AdminInvoicesTab />}
         {activeTab === 'admin_students' && userProfile?.role === 'admin' && <AdminStudentsTab />}
-        {activeTab === 'admin_past' && userProfile?.role === 'admin' && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">
-              {pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}
-            </div>
-          </div>
-        )}
+        {activeTab === 'admin_past' && userProfile?.role === 'admin' && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
         {activeTab === 'admin_settings' && userProfile?.role === 'admin' && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks}/>}
       </div>
 
@@ -1418,22 +915,7 @@ const handleCancelBoutiqueOrder = async (id: string) => {
       {userProfile && <BoutiqueModal isOpen={isBoutiqueOpen} onClose={() => setBoutiqueOpen(false)} user={userProfile} packs={creditPacks} />}
       
       {bookingSuccessData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
-            <h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3>
-            <p className="text-gray-600 mb-4 font-medium">Ta place est confirmée pour le cours.</p>
-            <div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
-              <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel</h4>
-              <ul className="text-sm text-amber-800 space-y-1 mb-4 list-disc pl-5"><li>Short court + brassière</li><li>Tapis de yoga</li><li>Gourde d'eau</li></ul>
-              <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter</h4>
-              <ul className="text-sm text-amber-800 space-y-1 list-none"><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Retire tes bijoux.</li><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Pas de crème/huile sur le corps !</li></ul>
-            </div>
-            <div className="flex flex-col gap-3">
-              <a href={generateGoogleCalendarLink(bookingSuccessData.title, bookingSuccessData.startAt, bookingSuccessData.endAt, bookingSuccessData.locationAddress || bookingSuccessData.location, bookingSuccessData.description || '')} target="_blank" rel="noreferrer" onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 flex justify-center gap-2"><CalendarPlus size={20}/> Ajouter à mon Agenda</a>
-              <button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600">J'ai compris, à vite !</button>
-            </div>
-          </div>
-        </div>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200"><h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3><p className="text-gray-600 mb-4 font-medium">Ta place est confirmée pour le cours.</p><div className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100"><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel</h4><ul className="text-sm text-amber-800 space-y-1 mb-4 list-disc pl-5"><li>Short court + brassière</li><li>Tapis de yoga</li><li>Gourde d'eau</li></ul><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter</h4><ul className="text-sm text-amber-800 space-y-1 list-none"><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Retire tes bijoux.</li><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Pas de crème/huile sur le corps !</li></ul></div><div className="flex flex-col gap-3"><a href={generateGoogleCalendarLink(bookingSuccessData.title, bookingSuccessData.startAt, bookingSuccessData.endAt, bookingSuccessData.locationAddress || bookingSuccessData.location, bookingSuccessData.description || '')} target="_blank" rel="noreferrer" onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 flex justify-center gap-2"><CalendarPlus size={20}/> Ajouter à mon Agenda</a><button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600">J'ai compris, à vite !</button></div></div></div>
       )}
     </div>
   );
