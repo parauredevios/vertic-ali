@@ -117,12 +117,17 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   let index = paidBookings.findIndex(b => b.id === booking.id) + 1; if (index === 0) index = 1;
   const invNumber = `FAC-${booking.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
   
-  const doc = new jsPDF(); const dateStr = booking.paidAt ? new Date(booking.paidAt).toLocaleDateString('fr-FR') : new Date(booking.date).toLocaleDateString('fr-FR');
+  const doc = new jsPDF(); 
+  const dateStr = booking.paidAt ? new Date(booking.paidAt).toLocaleDateString('fr-FR') : new Date(booking.date).toLocaleDateString('fr-FR');
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  
   const clientName = booking.userName.replace(" (Manuel)", ""); const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   let rawPrice = classInfo.price || booking.price || '0'; rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); if (isNaN(Number(rawPrice))) rawPrice = "0"; const priceVal = `${rawPrice},00 €`;
   doc.setFont("helvetica", "normal"); doc.text(`Cours : ${classInfo.title}`, 20, 110); doc.setFontSize(8); doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); doc.setFontSize(10); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${classInfo.startAt.toLocaleDateString('fr-FR').replace(/\//g,'')}.pdf`);
+  renderInvoiceFooter(doc, priceVal); 
+  
+  doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
@@ -131,12 +136,17 @@ const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: 
   let index = paidPacks.findIndex(p => p.id === purchase.id) + 1; if (index === 0) index = 1;
   const invNumber = `FAC-B-${purchase.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
   
-  const doc = new jsPDF(); const dateStr = purchase.paidAt ? new Date(purchase.paidAt).toLocaleDateString('fr-FR') : new Date(purchase.date).toLocaleDateString('fr-FR');
+  const doc = new jsPDF(); 
+  const dateStr = purchase.paidAt ? new Date(purchase.paidAt).toLocaleDateString('fr-FR') : new Date(purchase.date).toLocaleDateString('fr-FR');
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  
   const clientName = purchase.userName; const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   const priceVal = `${purchase.price.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); doc.text(`Boutique : ${purchase.packName} (${purchase.qty} crédits)`, 20, 110); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'')}.pdf`);
+  renderInvoiceFooter(doc, priceVal); 
+  
+  doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
@@ -146,12 +156,17 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
   const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC';
   const invNumber = `${prefix}-PRO-${client.id.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
 
-  const doc = new jsPDF(); const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
+  const doc = new jsPDF(); 
+  const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
   const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
   const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`; const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); const splitDesc = doc.splitTextToSize(invoice.desc, 85); doc.text(splitDesc, 20, 110); doc.text(invoice.qty.toString(), 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(totalVal, 175, 110);
-  renderInvoiceFooter(doc, totalVal); doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'')}.pdf`);
+  renderInvoiceFooter(doc, totalVal); 
+  
+  doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_Editee_le_${editionDateStr}.pdf`);
 };
 
 // --- COMPOSANTS ADMIN ---
@@ -328,7 +343,7 @@ const AdminInvoicesTab = () => {
                           {isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black">Retard</span>}
                         </p>
                         <p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>
-                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}
+                          {b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture téléchargée`}
                         </p>
                       </div>
                       <div className="flex gap-2">
