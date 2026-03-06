@@ -288,24 +288,40 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
 const AdminBoutiqueTab = () => {
   const [purchases, setPurchases] = useState<CreditPurchase[]>([]);
   useEffect(() => { const unsub = onSnapshot(query(collection(db, "credit_purchases"), orderBy("date", "desc")), (snap) => setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)))); return () => unsub(); }, []);
+  
   const validatePurchase = async (p: CreditPurchase) => {
     if(!window.confirm(`Valider le paiement de ${p.price}€ et ajouter ${p.qty} crédits à ${p.userName} ?`)) return;
     try {
-      const userRef = doc(db, "users", p.userId); const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
+      const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
       if (userSnap.empty) return; const userData = userSnap.docs[0].data() as UserProfile;
       const nowStr = new Date().toISOString(); const expires = new Date(); expires.setDate(expires.getDate() + p.validityDays);
-      await updateDoc(userRef, { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] });
+      await updateDoc(doc(db, "users", p.userId), { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] });
       await updateDoc(doc(db, "credit_purchases", p.id), { status: 'PAID', paidAt: nowStr });
       syncToSheet({ type: 'CREDIT_PURCHASE', id: p.id, packName: p.packName, date: new Date().toLocaleDateString('fr-FR'), price: p.price, studentName: p.userName, studentId: p.userId });
       alert("Crédits ajoutés avec succès !");
     } catch (e) { alert("Erreur."); }
   };
 
+  const handleCancelPurchase = async (id: string) => {
+    if (!window.confirm("Supprimer cette commande en attente ?")) return;
+    try { await deleteDoc(doc(db, "credit_purchases", id)); } catch(e) { alert("Erreur lors de l'annulation."); }
+  };
+
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 text-left">
       <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><ShoppingBag className="text-amber-500"/> Commandes de Crédits</h3>
       {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (
-        <div className="space-y-4">{purchases.map(p => (<div key={p.id} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-gray-50"><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? <button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg font-bold text-sm flex gap-2"><CheckCircle size={16}/> Valider le paiement</button> : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>
+        <div className="space-y-4">{purchases.map(p => (
+          <div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}>
+            <div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>
+            {p.status === 'PENDING' ? (
+              <div className="flex items-center gap-2">
+                <button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1"><CheckCircle size={16}/> Valider</button>
+                <button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg"><Trash2 size={16}/></button>
+              </div>
+            ) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}
+          </div>
+        ))}</div>
       )}
     </div>
   );
@@ -977,11 +993,27 @@ const LoginScreen = () => {
     catch (err) { setError('Email ou mot de passe incorrect.'); setLoading(false); }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault(); setError(''); setMsg(''); setLoading(true);
     if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
     if (!firstName || !lastName) { setError('Veuillez renseigner votre nom et prénom.'); setLoading(false); return; }
     if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); setLoading(false); return; }
+    
+    const domain = email.trim().toLowerCase().split('@')[1];
+    const forbiddenDomains = ['yopmail.com', 'yopmail.fr', 'tempmail.com', '10minutemail.com', 'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'jetable.org'];
+    
+    try {
+      // Vérification API anti-jetable
+      const res = await fetch('https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf');
+      const text = await res.text();
+      if (text.includes(domain) || forbiddenDomains.includes(domain)) {
+         setError("⚠️ Les adresses email jetables ou temporaires sont interdites.");
+         setLoading(false); return;
+      }
+    } catch (err) {
+      if (forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ne sont pas autorisées."); setLoading(false); return; }
+    }
+
     try {
       const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
@@ -1221,7 +1253,12 @@ export default function App() {
     } catch (e) { alert("Erreur: " + e); }
     setProcessingId(null);
   };
-
+  
+const handleCancelBoutiqueOrder = async (id: string) => {
+    if (!window.confirm("Es-tu sûre de vouloir annuler cette commande ?")) return;
+    try { await deleteDoc(doc(db, "credit_purchases", id)); alert("Commande annulée !"); } catch(e) { alert("Erreur."); }
+  };
+  
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
@@ -1319,7 +1356,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'history' && (
+{activeTab === 'history' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl text-left">
             <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><History className="text-amber-600"/> Mon Historique & Achats</h2>
             {userTimeline.length === 0 ? <p className="text-gray-500">Aucun historique pour le moment.</p> : (
@@ -1346,8 +1383,10 @@ export default function App() {
                         <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-200 text-amber-900">BOUTIQUE</span><h3 className="font-bold text-gray-800">{p.packName}</h3></div><p className="text-sm text-gray-600">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p><p className="text-xs text-amber-700 font-medium mt-0.5">Valide jusqu'au {expiryDate.toLocaleDateString('fr-FR')}</p></div>
                         <div className="text-right flex flex-col items-end gap-2">
                           <div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-xs font-bold px-2 py-1 rounded-md ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>
-                          {p.status === 'PAID' && (
-                            <button onClick={() => generatePackInvoicePDF(p, userProfile)} className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors"><Download size={14}/> Ma facture</button>
+                          {p.status === 'PAID' ? (
+                            <button onClick={() => generatePackInvoicePDF(p, userProfile)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"><Download size={12}/> Facture PDF</button>
+                          ) : (
+                            <button onClick={() => handleCancelBoutiqueOrder(p.id)} className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded hover:bg-red-100 transition-colors"><Trash2 size={12}/> Annuler la commande</button>
                           )}
                         </div>
                       </div>
