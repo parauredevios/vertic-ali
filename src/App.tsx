@@ -112,14 +112,28 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string) => {
 };
 
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: { title: string, startAt: Date, price?: string }) => {
-  const q = query(collection(db, "bookings"), where("userId", "==", booking.userId), where("paymentStatus", "==", "PAID")); const snap = await getDocs(q);
-  const paidBookings = snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)).filter(b => b.paymentMethod !== 'CREDIT').sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
-  let index = paidBookings.findIndex(b => b.id === booking.id) + 1; if (index === 0) index = 1;
-  const invNumber = `FAC-${booking.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+  const invoiceDate = booking.paidAt ? new Date(booking.paidAt) : new Date(booking.date);
+  const yyyy = invoiceDate.getFullYear();
+  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+
+  const q = query(collection(db, "bookings"), where("paymentStatus", "==", "PAID")); 
+  const snap = await getDocs(q);
+  const monthBookings = snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as BookingInfo))
+    .filter(b => b.paymentMethod !== 'CREDIT')
+    .filter(b => {
+      const d = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
+      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
+    })
+    .sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
+  
+  let index = monthBookings.findIndex(b => b.id === booking.id) + 1; 
+  if (index === 0) index = monthBookings.length + 1;
+  const invNumber = `FAC-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
   
   const doc = new jsPDF(); 
-  const dateStr = booking.paidAt ? new Date(booking.paidAt).toLocaleDateString('fr-FR') : new Date(booking.date).toLocaleDateString('fr-FR');
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   
   const clientName = booking.userName.replace(" (Manuel)", ""); const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
@@ -131,14 +145,27 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
-  const q = query(collection(db, "credit_purchases"), where("userId", "==", purchase.userId), where("status", "==", "PAID")); const snap = await getDocs(q);
-  const paidPacks = snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase)).sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
-  let index = paidPacks.findIndex(p => p.id === purchase.id) + 1; if (index === 0) index = 1;
-  const invNumber = `FAC-B-${purchase.userId.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+  const invoiceDate = purchase.paidAt ? new Date(purchase.paidAt) : new Date(purchase.date);
+  const yyyy = invoiceDate.getFullYear();
+  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+
+  const q = query(collection(db, "credit_purchases"), where("status", "==", "PAID")); 
+  const snap = await getDocs(q);
+  const monthPacks = snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as CreditPurchase))
+    .filter(p => {
+      const d = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
+      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
+    })
+    .sort((a,b) => (a.paidAt ? new Date(a.paidAt).getTime() : new Date(a.date).getTime()) - (b.paidAt ? new Date(b.paidAt).getTime() : new Date(b.date).getTime()));
+  
+  let index = monthPacks.findIndex(p => p.id === purchase.id) + 1; 
+  if (index === 0) index = monthPacks.length + 1;
+  const invNumber = `FAC-B-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
   
   const doc = new jsPDF(); 
-  const dateStr = purchase.paidAt ? new Date(purchase.paidAt).toLocaleDateString('fr-FR') : new Date(purchase.date).toLocaleDateString('fr-FR');
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   
   const clientName = purchase.userName; const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
@@ -150,16 +177,30 @@ const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: 
 };
 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
-  const q = query(collection(db, "b2b_invoices"), where("clientId", "==", invoice.clientId)); const snap = await getDocs(q);
-  const invoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  let index = invoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = 1;
-  const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC';
-  const invNumber = `${prefix}-PRO-${client.id.slice(0,4).toUpperCase()}-${String(index).padStart(3, '0')}`;
+  const invoiceDate = new Date(invoice.date);
+  const yyyy = invoiceDate.getFullYear();
+  const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+
+  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
+  const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
+
+  const q = query(collection(db, "b2b_invoices"), where("status", "==", invoice.status)); 
+  const snap = await getDocs(q);
+  const monthInvoices = snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as B2BInvoice))
+    .filter(i => {
+      const d = new Date(i.date);
+      return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm;
+    })
+    .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  
+  let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; 
+  if (index === 0) index = monthInvoices.length + 1;
+  const invNumber = `${prefix}-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
 
   const doc = new jsPDF(); 
-  const dateStr = new Date(invoice.date).toLocaleDateString('fr-FR');
-  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE';
-  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-'); // Date du jour
+  const dateStr = invoiceDate.toLocaleDateString('fr-FR');
+  const editionDateStr = new Date().toLocaleDateString('fr-FR').replace(/\//g,'-');
   
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
   const priceVal = `${invoice.price.toFixed(2).replace('.', ',')} €`; const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
