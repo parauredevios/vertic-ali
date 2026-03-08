@@ -15,6 +15,7 @@ import jsPDF from 'jspdf';
 
 // --- CONFIGURATION ---
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
+const GOOGLE_EMAIL_URL = "https://script.google.com/macros/s/AKfycbytPtkOpS6vrQvs6DWYYd2g5XWL5mRZD8dbvxCrUfZhMrK-t4JJHMkv65Av8m8P8hCF/exec";
 
 // --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
@@ -67,7 +68,20 @@ const syncToSheet = async (payload: any) => {
 };
 
 const sendNotification = async (text: string, type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT') => {
-  try { await addDoc(collection(db, "notifications"), { text, date: new Date().toISOString(), read: false, type }); } catch (e) {}
+  try { 
+    // 1. Enregistre dans la base de données pour la cloche de notification sur le site
+    await addDoc(collection(db, "notifications"), { text, date: new Date().toISOString(), read: false, type }); 
+    
+    // 2. Envoie l'email en arrière-plan (sans bloquer l'application pour l'élève)
+    if (GOOGLE_EMAIL_URL && !GOOGLE_EMAIL_URL.includes("COLLE_TON_URL")) {
+      fetch(GOOGLE_EMAIL_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, type })
+      }).catch(e => console.log("Erreur silencieuse email:", e));
+    }
+  } catch (e) {}
 };
 
 const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
