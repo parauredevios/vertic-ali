@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Palette, Type, Square, MessageSquare, Mail, EyeOff, Ghost
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -69,11 +69,11 @@ const syncToSheet = async (payload: any) => {
 
 const sendNotification = async (text: string, type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT') => {
   try { 
-    // 1. Enregistre dans la base de données pour la cloche de notification sur le site
+    // 1. Notification interne sur le site
     await addDoc(collection(db, "notifications"), { text, date: new Date().toISOString(), read: false, type }); 
     
-    // 2. Envoie l'email en arrière-plan (sans bloquer l'application pour l'élève)
-    if (GOOGLE_EMAIL_URL && !GOOGLE_EMAIL_URL.includes("COLLE_TON_URL")) {
+    // 2. Envoi silencieux de l'email via Google Script
+    if (typeof GOOGLE_EMAIL_URL !== 'undefined' && !GOOGLE_EMAIL_URL.includes("COLLE_TON_URL")) {
       fetch(GOOGLE_EMAIL_URL, {
         method: "POST",
         mode: "no-cors",
@@ -89,8 +89,8 @@ const generateGoogleCalendarLink = (title: string, start: Date, end: Date, locat
   const formatDT = (date: Date) => date.toISOString().replace(/-|:|\.\d+/g, '');
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${formatDT(start)}/${formatDT(end)}&details=${encodeURIComponent(desc)}&location=${encodeURIComponent(location)}`;
 };
-const getActiveCredits = (user: UserProfile) => {
-  if (!user.creditPacks) return 0;
+const getActiveCredits = (user: UserProfile | null) => {
+  if (!user || !user.creditPacks) return 0;
   const now = new Date().getTime(); return user.creditPacks.filter(p => new Date(p.expiresAt).getTime() > now).reduce((sum, p) => sum + p.remaining, 0);
 };
 
@@ -188,37 +188,36 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
 };
 
 // --- COMPOSANTS ADMIN ---
-const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
+const AdminDashboardTab = ({ reminderDays, today }: { reminderDays: number, today: Date }) => {
   const [stats, setStats] = useState({ caMonthB2C: 0, caMonthB2B: 0, caYearB2C: 0, caYearB2B: 0, pendingCount: 0 });
   const [reminders, setReminders] = useState<any[]>([]); const [loading, setLoading] = useState(true);
   const [exportStartDate, setExportStartDate] = useState(''); const [exportEndDate, setExportEndDate] = useState(''); const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      const now = new Date(); const currentYear = now.getFullYear(); const firstDayOfMonth = new Date(currentYear, now.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
+      const currentYear = today.getFullYear(); const firstDayOfMonth = new Date(currentYear, today.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
       let caMB2C = 0; let caMB2B = 0; let caYB2C = 0; let caYB2B = 0; let lateItems: any[] = [];
-
       const snapB2C = await getDocs(query(collection(db, "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
         if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
-        if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
+        if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
       });
       const snapBoutique = await getDocs(query(collection(db, "credit_purchases")));
       snapBoutique.docs.forEach(d => {
         const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
         if (p.status === 'PAID') { if (accDate >= firstDayOfMonth) caMB2C += p.price; if (accDate >= firstDayOfYear) caYB2C += p.price; }
-        if (p.status === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate }); }
+        if (p.status === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate }); }
       });
       const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
         if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((now.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < now) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc || ''}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc || ''}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
       });
       setStats({ caMonthB2C: caMB2C, caMonthB2B: caMB2B, caYearB2C: caYB2C, caYearB2B: caYB2B, pendingCount: lateItems.length }); setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime())); setLoading(false);
     }; fetchDashboardData();
-  }, [reminderDays]);
+  }, [reminderDays, today]);
 
   const handleExportCSV = async (start: Date, end: Date, periodName: string) => {
     setIsExporting(true);
@@ -234,15 +233,79 @@ const AdminDashboardTab = ({ reminderDays }: { reminderDays: number }) => {
       const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Export_URSSAF_${periodName}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
     } catch (error) { alert("Erreur export."); } setIsExporting(false);
   };
-  const exportCurrentMonth = () => { const now = new Date(); handleExportCSV(new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0), `Mois_${now.getMonth()+1}_${now.getFullYear()}`); };
+  const exportCurrentMonth = () => { handleExportCSV(new Date(today.getFullYear(), today.getMonth(), 1), new Date(today.getFullYear(), today.getMonth() + 1, 0), `Mois_${today.getMonth()+1}_${today.getFullYear()}`); };
   const exportCustomPeriod = () => { if (!exportStartDate || !exportEndDate) return alert("Dates requises."); const start = new Date(exportStartDate); const end = new Date(exportEndDate); if (start > end) return; handleExportCSV(start, end, `Periode_${exportStartDate}_au_${exportEndDate}`); };
+  
   if (loading) return <div className="text-center p-10"><Loader2 className="animate-spin inline mr-2"/></div>;
 
   return (
     <div className="space-y-8 text-left">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 shadow-sm border border-gray-100 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-green-50 text-green-600 rounded-xl theme-btn"><TrendingUp size={24}/></div><p className="font-bold text-gray-500 uppercase">CA Élèves</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2C} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2C} €</p></div><div className="bg-white p-6 shadow-sm border border-gray-100 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl theme-btn"><Briefcase size={24}/></div><p className="font-bold text-gray-500 uppercase">CA PRO</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2B} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2B} €</p></div><div className="bg-gray-800 p-6 shadow-md border border-gray-700 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-amber-500 text-gray-900 rounded-xl theme-btn"><Wallet size={24}/></div><p className="font-bold text-gray-400 uppercase">CA TOTAL</p></div><p className="text-3xl font-black text-white">{stats.caMonthB2C + stats.caMonthB2B} € <span className="text-sm font-normal text-gray-500">/ mois</span></p><p className="text-sm font-bold text-amber-500 mt-2">Année : {stats.caYearB2C + stats.caYearB2B} €</p></div></div>
-      <div className="bg-white shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6 theme-card"><div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6"><div className="flex items-center gap-3"><div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl theme-btn"><FileSpreadsheet size={24}/></div><div><h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3><p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes.</p></div></div><button onClick={exportCurrentMonth} disabled={isExporting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 font-bold flex gap-2 theme-btn">{isExporting ? <Loader2 className="animate-spin" size={18}/> : <Download size={18}/>} Export du Mois</button></div><div className="bg-gray-50 border border-gray-200 p-4 flex flex-col md:flex-row items-center gap-4 theme-card"><span className="text-sm font-bold text-gray-600">Période :</span><input type="date" value={exportStartDate} onChange={e=>setExportStartDate(e.target.value)} className="p-2 border text-sm theme-btn" /> à <input type="date" value={exportEndDate} onChange={e=>setExportEndDate(e.target.value)} className="p-2 border text-sm theme-btn" /><button onClick={exportCustomPeriod} disabled={isExporting || !exportStartDate || !exportEndDate} className="bg-white border border-gray-300 px-4 py-2 font-bold text-sm theme-btn">Exporter</button></div></div>
-      <div className="bg-white shadow-sm border border-gray-200 overflow-hidden theme-card"><div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2"><AlertTriangle className="text-orange-500"/><h3 className="font-bold text-gray-800 text-lg">Retards de paiement (&gt; {reminderDays} j)</h3></div><div className="p-5">{reminders.length === 0 ? <p className="text-gray-500">Aucun retard.</p> : (<div className="space-y-3">{reminders.map(r => (<div key={r.id} className="flex justify-between items-center bg-white p-4 border border-red-100 shadow-sm theme-card"><div><div className="flex items-center gap-2 mb-1"><span className={`text-[10px] font-black px-2 py-0.5 theme-btn ${r.type === 'PRO' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{r.type}</span><p className="font-bold text-gray-800">{r.name}</p></div><p className="text-xs text-gray-500">{r.desc}</p></div><div className="text-right"><p className="font-bold text-red-600">{r.price}</p><p className="text-xs text-gray-400">Via {r.method}</p></div></div>))}</div>)}</div></div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-green-50 text-green-600 rounded-xl theme-btn"><TrendingUp size={24}/></div><p className="font-bold text-gray-500 uppercase">CA Élèves</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2C} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2C} €</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl theme-btn"><Briefcase size={24}/></div><p className="font-bold text-gray-500 uppercase">CA PRO</p></div><p className="text-3xl font-black text-gray-800">{stats.caMonthB2B} € <span className="text-sm font-normal text-gray-400">/ mois</span></p><p className="text-sm font-bold text-gray-400 mt-2">Année : {stats.caYearB2B} €</p></div><div className="bg-gray-800 p-6 rounded-2xl shadow-md border border-gray-700 theme-card"><div className="flex items-center gap-4 mb-4"><div className="p-3 bg-amber-500 text-gray-900 rounded-xl theme-btn"><Wallet size={24}/></div><p className="font-bold text-gray-400 uppercase">CA TOTAL</p></div><p className="text-3xl font-black text-white">{stats.caMonthB2C + stats.caMonthB2B} € <span className="text-sm font-normal text-gray-500">/ mois</span></p><p className="text-sm font-bold text-amber-500 mt-2">Année : {stats.caYearB2C + stats.caYearB2B} €</p></div></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 p-6 theme-card"><div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6"><div className="flex items-center gap-3"><div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl theme-btn"><FileSpreadsheet size={24}/></div><div><h3 className="font-bold text-indigo-900 text-lg">Export Comptable URSSAF</h3><p className="text-sm text-indigo-700/70 font-medium">Téléchargez les recettes.</p></div></div><button onClick={exportCurrentMonth} disabled={isExporting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex gap-2 theme-btn">{isExporting ? <Loader2 className="animate-spin" size={18}/> : <Download size={18}/>} Export du Mois</button></div><div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row items-center gap-4 theme-card"><span className="text-sm font-bold text-gray-600">Période :</span><input type="date" value={exportStartDate} onChange={e=>setExportStartDate(e.target.value)} className="p-2 border rounded-lg text-sm theme-btn" /> à <input type="date" value={exportEndDate} onChange={e=>setExportEndDate(e.target.value)} className="p-2 border rounded-lg text-sm theme-btn" /><button onClick={exportCustomPeriod} disabled={isExporting || !exportStartDate || !exportEndDate} className="bg-white border border-gray-300 px-4 py-2 rounded-lg font-bold text-sm theme-btn">Exporter</button></div></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden theme-card"><div className="p-5 border-b border-gray-200 bg-gray-50 flex items-center gap-2"><AlertTriangle className="text-orange-500"/><h3 className="font-bold text-gray-800 text-lg">Retards de paiement (&gt; {reminderDays} j)</h3></div><div className="p-5">{reminders.length === 0 ? <p className="text-gray-500">Aucun retard.</p> : (<div className="space-y-3">{reminders.map(r => (<div key={r.id} className="flex justify-between items-center bg-white p-4 rounded-xl border border-red-100 shadow-sm theme-card"><div><div className="flex items-center gap-2 mb-1"><span className={`text-[10px] font-black px-2 py-0.5 rounded-md theme-btn ${r.type === 'PRO' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{r.type}</span><p className="font-bold text-gray-800">{r.name}</p></div><p className="text-xs text-gray-500">{r.desc}</p></div><div className="text-right"><p className="font-bold text-red-600">{r.price}</p><p className="text-xs text-gray-400">Via {r.method}</p></div></div>))}</div>)}</div></div>
+    </div>
+  );
+};
+
+const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClass[], users: UserProfile[], today: Date, bookings: BookingInfo[] }) => {
+  const todayStr = today.toLocaleDateString('fr-FR');
+  const todayClasses = classes.filter(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayStr).sort((a,b) => a.startAt.getTime() - b.startAt.getTime());
+
+  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
+    const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
+    const nowStr = new Date().toISOString();
+    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
+    syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: bookingData.price });
+  };
+
+  return (
+    <div className="space-y-6 text-left">
+      <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2 mb-2"><Clock className="text-amber-500"/> Cours d'aujourd'hui</h2>
+      {todayClasses.length === 0 ? <p className="text-gray-500 bg-white p-10 rounded-2xl text-center theme-card border">Aucun cours prévu aujourd'hui.</p> : todayClasses.map(c => {
+        const classUsers = users.filter(u => c.attendeeIds?.includes(u.id));
+        const phones = classUsers.map(u => u.phone).filter(Boolean);
+        const emails = classUsers.map(u => u.email).filter(Boolean);
+        return (
+          <div key={c.id} className="bg-white border-2 border-amber-200 rounded-2xl shadow-sm theme-card overflow-hidden">
+            <div className="p-4 bg-amber-50 border-b border-amber-100 flex justify-between items-center">
+              <div><h3 className="font-bold text-amber-900">{c.title}</h3><p className="text-xs text-amber-700">{c.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})} - {c.location}</p></div>
+              <span className="bg-amber-200 text-amber-900 text-[10px] font-black px-2 py-1 rounded-lg theme-btn uppercase">{c.attendeesCount} / {c.maxCapacity} inscrits</span>
+            </div>
+            <div className="p-2 space-y-1">
+              {c.attendeeIds?.length === 0 && <p className="text-xs text-gray-400 p-2 text-center">Aucun inscrit pour le moment</p>}
+              {classUsers.map(student => {
+                const b = bookings.find(x => x.classId === c.id && x.userId === student.id);
+                return (
+                  <div key={student.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 theme-card transition-colors border-b border-gray-50 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-gray-800 text-sm">{student.displayName}</span>
+                      {student.imageRights === 'no' && <span title="REFUS DROIT À L'IMAGE" className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-md font-black theme-btn animate-pulse shadow-sm">⚠️ IMAGE</span>}
+                      {!student.hasFilledForm && <span title="Fiche non remplie" className="bg-orange-500 text-white text-[10px] px-2 py-0.5 rounded-md font-black theme-btn">FICHE MANQUANTE</span>}
+                    </div>
+                    <div className="flex gap-3 items-center">
+                       <span className="text-[10px] text-gray-400 font-bold uppercase hidden md:block">{student.phone || 'Pas de tél'}</span>
+                       {b && (
+                          <div className="flex items-center gap-2">
+                             <span className="text-[10px] font-bold text-gray-500 hidden sm:block">{b.paymentMethod}</span>
+                             <button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg font-bold text-xs min-w-[85px] theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                               {b.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
+                             </button>
+                          </div>
+                       )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {classUsers.length > 0 && (
+              <div className="flex gap-2 p-3 bg-gray-50 border-t border-gray-100">
+                <button onClick={() => {navigator.clipboard.writeText(phones.join(', ')); alert("Numéros copiés dans le presse-papier !");}} className="flex-1 bg-white border border-gray-300 py-2 rounded-lg text-xs font-bold flex justify-center gap-1.5 text-gray-700 hover:bg-gray-100 theme-btn"><MessageSquare size={14}/> Copier SMS</button>
+                <a href={`mailto:?bcc=${emails.join(',')}&subject=Cours Vertic'Ali : ${c.title}`} className="flex-1 bg-white border border-gray-300 py-2 rounded-lg text-xs font-bold flex justify-center gap-1.5 text-gray-700 hover:bg-gray-100 theme-btn"><Mail size={14}/> Email Groupé</a>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -254,14 +317,14 @@ const AdminBoutiqueTab = () => {
   const handleCancelPurchase = async (id: string) => { if (!window.confirm("Supprimer cette commande en attente ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); } catch(e) { alert("Erreur lors de l'annulation."); } };
 
   return (
-    <div className="bg-white p-6 shadow-sm border border-gray-200 text-left theme-card">
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 text-left theme-card">
       <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><ShoppingBag className="text-amber-500"/> Commandes de Crédits</h3>
-      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (<div className="space-y-4">{purchases.map(p => (<div key={p.id} className={`flex justify-between items-center p-4 border theme-card ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? (<div className="flex items-center gap-2"><button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 font-bold text-sm flex gap-1 theme-btn"><CheckCircle size={16}/> Valider</button><button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 theme-btn"><Trash2 size={16}/></button></div>) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 theme-btn">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>)}
+      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (<div className="space-y-4">{purchases.map(p => (<div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border theme-card ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? (<div className="flex items-center gap-2"><button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1 theme-btn"><CheckCircle size={16}/> Valider</button><button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg theme-btn"><Trash2 size={16}/></button></div>) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md theme-btn">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>)}
     </div>
   );
 };
 
-const AdminInvoicesTab = () => {
+const AdminInvoicesTab = ({ today }: { today: Date }) => {
   const [viewMode, setViewMode] = useState<'PENDING' | 'ARCHIVED' | 'BOUTIQUE' | 'B2B'>('PENDING');
   const [allBookings, setAllBookings] = useState<BookingInfo[]>([]); const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
   const [proClients, setProClients] = useState<ProClient[]>([]); const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
@@ -278,8 +341,8 @@ const AdminInvoicesTab = () => {
     }; fetchAll();
   }, []);
 
-  const pendingGroups: any = {}; const archivedGroups: any = {}; const now = new Date().getTime();
-  allBookings.forEach(b => { if (b.paymentMethod === 'CREDIT') return; const isPast = new Date(b.date).getTime() < now; const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded); const targetGroup = needsAction ? pendingGroups : archivedGroups; if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] }; targetGroup[b.classId].bookings.push({ ...b, isPast }); });
+  const pendingGroups: any = {}; const archivedGroups: any = {}; const nowTime = today.getTime();
+  allBookings.forEach(b => { if (b.paymentMethod === 'CREDIT') return; const isPast = new Date(b.date).getTime() < nowTime; const needsAction = (b.paymentStatus === 'PENDING') || (b.paymentStatus === 'PAID' && !b.invoiceDownloaded); const targetGroup = needsAction ? pendingGroups : archivedGroups; if(!targetGroup[b.classId]) targetGroup[b.classId] = { classId: b.classId, classTitle: b.classTitle, date: b.date, bookings: [] }; targetGroup[b.classId].bookings.push({ ...b, isPast }); });
   const pendingClasses = Object.values(pendingGroups).sort((a:any,b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const archivedClasses = Object.values(archivedGroups).sort((a:any,b:any) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const classesToDisplay = viewMode === 'PENDING' ? pendingClasses : archivedClasses;
@@ -292,48 +355,48 @@ const AdminInvoicesTab = () => {
 
   return (
     <div className="space-y-6 text-left">
-      <div className="flex gap-2 p-1 bg-gray-200 w-fit flex-wrap theme-btn"><button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 font-bold text-sm theme-btn ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (À traiter)</button><button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 font-bold text-sm theme-btn ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (Archives)</button><button onClick={() => setViewMode('BOUTIQUE')} className={`px-4 py-2 font-bold text-sm flex gap-1 items-center theme-btn ${viewMode === 'BOUTIQUE' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500'}`}><ShoppingBag size={14}/> Boutique</button><button onClick={() => setViewMode('B2B')} className={`px-4 py-2 font-bold text-sm flex gap-1 items-center theme-btn ${viewMode === 'B2B' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500'}`}><Briefcase size={14}/> Prestations PRO</button></div>
+      <div className="flex gap-2 p-1 bg-gray-200 rounded-xl w-fit flex-wrap theme-btn"><button onClick={() => setViewMode('PENDING')} className={`px-4 py-2 font-bold text-sm theme-btn ${viewMode === 'PENDING' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (À traiter)</button><button onClick={() => setViewMode('ARCHIVED')} className={`px-4 py-2 font-bold text-sm theme-btn ${viewMode === 'ARCHIVED' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}>Élèves (Archives)</button><button onClick={() => setViewMode('BOUTIQUE')} className={`px-4 py-2 font-bold text-sm flex gap-1 items-center theme-btn ${viewMode === 'BOUTIQUE' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500'}`}><ShoppingBag size={14}/> Boutique</button><button onClick={() => setViewMode('B2B')} className={`px-4 py-2 font-bold text-sm flex gap-1 items-center theme-btn ${viewMode === 'B2B' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500'}`}><Briefcase size={14}/> Prestations PRO</button></div>
       {viewMode === 'BOUTIQUE' ? <AdminBoutiqueTab /> : viewMode === 'B2B' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-6">
-            <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3><form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 border border-gray-200 theme-card"><input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom *" className="p-2 border outline-none text-sm theme-btn"/><input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border outline-none text-sm theme-btn"/><input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="SIRET" className="p-2 border outline-none text-sm theme-btn"/><div className="flex gap-2 mt-2">{editingProId && <button type="button" onClick={()=>{setEditingProId(null); setNewProClient({name:'', address:'', siret:''});}} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-gray-800 text-white font-bold py-2 theme-btn">{editingProId ? 'Mettre à jour' : 'Ajouter'}</button></div></form><div className="space-y-2 max-h-40 overflow-y-auto pr-2">{proClients.map(c => (<div key={c.id} className="flex justify-between items-center bg-white p-3 border border-gray-100 shadow-sm theme-card"><div><p className="font-bold text-sm text-gray-800">{c.name}</p><p className="text-xs text-gray-500">{c.address}</p></div><div className="flex gap-1"><button onClick={() => { setNewProClient(c); setEditingProId(c.id); }} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
-            <div className="bg-white p-6 shadow-sm border border-indigo-200 ring-4 ring-indigo-50 theme-card"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>{proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3><form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200 theme-card"><input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom *" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="SIRET" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><div className="flex gap-2 mt-2">{editingProId && <button type="button" onClick={()=>{setEditingProId(null); setNewProClient({name:'', address:'', siret:''});}} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-gray-800 text-white font-bold py-2 theme-btn">{editingProId ? 'Mettre à jour' : 'Ajouter'}</button></div></form><div className="space-y-2 max-h-40 overflow-y-auto pr-2">{proClients.map(c => (<div key={c.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm theme-card"><div><p className="font-bold text-sm text-gray-800">{c.name}</p><p className="text-xs text-gray-500">{c.address}</p></div><div className="flex gap-1"><button onClick={() => { setNewProClient(c); setEditingProId(c.id); }} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 theme-card"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>{proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4">
               <select value={b2bInvoiceData.clientId} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, clientId: e.target.value})} className="w-full p-3 border border-gray-200 bg-white outline-none focus:border-indigo-500 theme-btn"><option value="">-- Client --</option>{proClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-              <div className="space-y-3 bg-gray-50 p-3 border border-gray-200 theme-card">
+              <div className="space-y-3 bg-gray-50 p-3 rounded-xl border border-gray-200 theme-card">
                 <div className="flex justify-between items-center"><label className="text-xs font-bold text-gray-500 uppercase">Lignes de prestation</label></div>
                 {b2bInvoiceData.items.map((item, idx) => (
-                  <div key={idx} className="flex flex-col gap-2 p-3 bg-white border shadow-sm relative theme-card">
-                     <textarea value={item.desc} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].desc = e.target.value; setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Description de la prestation" className="w-full p-2 border outline-none text-sm min-h-[60px] theme-btn"/>
+                  <div key={idx} className="flex flex-col gap-2 p-3 bg-white rounded-lg border shadow-sm relative theme-card">
+                     <textarea value={item.desc} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].desc = e.target.value; setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Description de la prestation" className="w-full p-2 border rounded-lg outline-none text-sm min-h-[60px] theme-btn"/>
                      <div className="flex gap-2 items-center">
-                       <input type="number" step="0.5" value={item.qty} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].qty = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Qté" className="w-20 p-2 border outline-none text-sm text-center theme-btn"/>
+                       <input type="number" step="0.5" value={item.qty} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].qty = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Qté" className="w-20 p-2 border rounded-lg outline-none text-sm text-center theme-btn"/>
                        <span className="text-gray-400 text-sm">x</span>
-                       <input type="number" step="1" value={item.price} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].price = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Prix (€)" className="w-24 p-2 border outline-none text-sm text-right theme-btn"/>
+                       <input type="number" step="1" value={item.price} onChange={e => { const newItems = [...b2bInvoiceData.items]; newItems[idx].price = Number(e.target.value); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} placeholder="Prix (€)" className="w-24 p-2 border rounded-lg outline-none text-sm text-right theme-btn"/>
                        <span className="ml-auto font-bold text-indigo-700 text-sm">{(item.qty * item.price).toFixed(2)} €</span>
                        {b2bInvoiceData.items.length > 1 && <button type="button" onClick={() => { const newItems = b2bInvoiceData.items.filter((_, i) => i !== idx); setB2bInvoiceData({...b2bInvoiceData, items: newItems}); }} className="ml-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>}
                      </div>
                   </div>
                 ))}
-                <button type="button" onClick={() => setB2bInvoiceData({...b2bInvoiceData, items: [...b2bInvoiceData.items, {desc: '', qty: 1, price: 0}]})} className="w-full py-2 border-2 border-dashed border-indigo-200 text-indigo-600 font-bold text-sm flex justify-center gap-2 hover:bg-indigo-50 transition-colors theme-btn"><Plus size={16}/> Ajouter une ligne</button>
+                <button type="button" onClick={() => setB2bInvoiceData({...b2bInvoiceData, items: [...b2bInvoiceData.items, {desc: '', qty: 1, price: 0}]})} className="w-full py-2 border-2 border-dashed border-indigo-200 text-indigo-600 font-bold rounded-lg text-sm flex justify-center gap-2 hover:bg-indigo-50 transition-colors theme-btn"><Plus size={16}/> Ajouter une ligne</button>
               </div>
-              <div className="flex gap-2 mt-4">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', items:[{desc:'', qty:1, price:0}]});}} className="flex-1 bg-gray-200 py-3 font-bold hover:bg-gray-300 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 shadow-md theme-btn">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div>
+              <div className="flex gap-2 mt-4">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', items:[{desc:'', qty:1, price:0}]});}} className="flex-1 bg-gray-200 py-3 rounded-xl font-bold hover:bg-gray-300 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md theme-btn">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div>
             </form>)}</div>
           </div>
-          <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3><div className="space-y-4">{b2bInvoices.map(inv => { const client = proClients.find(c => c.id === inv.clientId); return (<div key={inv.id} className="p-4 border border-gray-200 bg-gray-50 flex flex-col gap-3 theme-card"><div className="flex justify-between items-start"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-indigo-100 text-indigo-700 theme-btn">{inv.status}</span><span className="font-bold text-gray-800">{inv.clientName}</span></div><p className="text-sm text-gray-600">{inv.desc || (inv.items && inv.items[0]?.desc)}</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-indigo-700">{inv.total} €</span>{client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 hover:bg-gray-100 theme-btn"><Download size={12}/> PDF</button>}</div></div>{inv.status === 'DEVIS' ? <div className="flex gap-2"><button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold theme-btn">Passer en Facture</button><button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, items: inv.items && inv.items.length > 0 ? inv.items : [{desc: inv.desc || '', qty: inv.qty || 1, price: inv.price || 0}] }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-50 theme-btn">Modifier</button><button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 theme-btn"><Trash2 size={16}/></button></div> : (<div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1"><select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 border bg-white outline-none theme-btn"><option value="ESPECE">Espèces</option><option value="VIREMENT_RIB">Virement</option><option value="WERO_PAYPAL">Wero/Paypal</option></select><button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 text-xs font-bold theme-btn ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</button><button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>)}</div>); })}</div></div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3><div className="space-y-4">{b2bInvoices.map(inv => { const client = proClients.find(c => c.id === inv.clientId); return (<div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3 theme-card"><div className="flex justify-between items-start"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 theme-btn">{inv.status}</span><span className="font-bold text-gray-800">{inv.clientName}</span></div><p className="text-sm text-gray-600">{inv.desc || (inv.items && inv.items[0]?.desc)}</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-indigo-700">{inv.total} €</span>{client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100 theme-btn"><Download size={12}/> PDF</button>}</div></div>{inv.status === 'DEVIS' ? <div className="flex gap-2"><button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold theme-btn">Passer en Facture</button><button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, items: inv.items && inv.items.length > 0 ? inv.items : [{desc: inv.desc || '', qty: inv.qty || 1, price: inv.price || 0}] }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-50 theme-btn">Modifier</button><button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 theme-btn"><Trash2 size={16}/></button></div> : (<div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1"><select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 border bg-white outline-none theme-btn"><option value="ESPECE">Espèces</option><option value="VIREMENT_RIB">Virement</option><option value="WERO_PAYPAL">Wero/Paypal</option></select><button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 text-xs font-bold theme-btn ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</button><button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>)}</div>); })}</div></div>
         </div>
       ) : (
         <div className="space-y-4">
           {classesToDisplay.length === 0 ? <p className="text-gray-500 text-center py-10">Aucune facture dans cette catégorie.</p> : classesToDisplay.map((c:any) => (
-            <div key={c.classId} className="bg-white shadow-sm border border-gray-200 overflow-hidden text-left theme-card">
+            <div key={c.classId} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden text-left theme-card">
               <div className="p-4 bg-gray-50 border-b border-gray-100"><div><h3 className="font-bold text-gray-800 text-lg">{c.classTitle}</h3><p className="text-sm text-gray-500">{new Date(c.date).toLocaleDateString('fr-FR')} - {c.bookings.length} facture(s) concernée(s)</p></div></div>
               <div className="p-2">
                 {c.bookings.map((b: any) => {
                   const isUnpaidPast = b.paymentStatus === 'PENDING' && b.isPast;
                   return (
-                    <div key={b.id} className={`flex justify-between items-center p-3 m-2 border theme-card ${isUnpaidPast ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100 shadow-sm'}`}>
-                      <div><p className="font-bold text-gray-800 text-sm flex items-center gap-2">{b.userName.replace(' (Manuel)', '')}{isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 uppercase tracking-wider font-black theme-btn">Retard</span>}</p><p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>{b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}</p></div>
+                    <div key={b.id} className={`flex justify-between items-center p-3 m-2 border rounded-xl theme-card ${isUnpaidPast ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100 shadow-sm'}`}>
+                      <div><p className="font-bold text-gray-800 text-sm flex items-center gap-2">{b.userName.replace(' (Manuel)', '')}{isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black theme-btn">Retard</span>}</p><p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>{b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}</p></div>
                       <div className="flex gap-2">
-                        {b.paymentStatus === 'PENDING' && (<button onClick={async () => { await updateDoc(doc(db, "bookings", b.id), { paymentStatus: 'PAID', paidAt: new Date().toISOString() }); syncToSheet({ type: 'BOOKING_UPDATE', classId: b.classId, classTitle: b.classTitle, date: b.dateStr, time: b.timeStr, location: b.location || '', studentId: b.userId, studentName: `${b.userName} (${b.paymentMethod})`, paymentStatus: 'PAID', price: b.price }); }} className="p-2 font-bold text-xs bg-green-50 text-green-600 hover:bg-green-100 flex items-center gap-1 border border-green-200 theme-btn"><CheckCircle size={14}/> Valider Paiement</button>)}
-                        <button onClick={async () => { await generateInvoicePDF(b, usersInfo[b.userId] || null, {title: c.classTitle, startAt: new Date(c.date), price: b.price}); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className={`p-2 font-bold text-xs flex items-center gap-1 border theme-btn ${b.paymentStatus === 'PAID' ? 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100' : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'}`}><Download size={14}/> {b.paymentStatus === 'PAID' ? 'Télécharger & Archiver' : 'Brouillon PDF'}</button>
+                        {b.paymentStatus === 'PENDING' && (<button onClick={async () => { await updateDoc(doc(db, "bookings", b.id), { paymentStatus: 'PAID', paidAt: new Date().toISOString() }); syncToSheet({ type: 'BOOKING_UPDATE', classId: b.classId, classTitle: b.classTitle, date: b.dateStr, time: b.timeStr, location: b.location || '', studentId: b.userId, studentName: `${b.userName} (${b.paymentMethod})`, paymentStatus: 'PAID', price: b.price }); }} className="p-2 rounded-lg font-bold text-xs bg-green-50 text-green-600 hover:bg-green-100 flex items-center gap-1 border border-green-200 theme-btn"><CheckCircle size={14}/> Valider Paiement</button>)}
+                        <button onClick={async () => { await generateInvoicePDF(b, usersInfo[b.userId] || null, {title: c.classTitle, startAt: new Date(c.date), price: b.price}); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className={`p-2 rounded-lg font-bold text-xs flex items-center gap-1 border theme-btn ${b.paymentStatus === 'PAID' ? 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100' : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'}`}><Download size={14}/> {b.paymentStatus === 'PAID' ? 'Télécharger & Archiver' : 'Brouillon PDF'}</button>
                       </div>
                     </div>
                   );
@@ -347,7 +410,7 @@ const AdminInvoicesTab = () => {
   );
 };
 
-const AdminStudentsTab = () => {
+const AdminStudentsTab = ({ onImpersonate }: { onImpersonate: (id: string) => void }) => {
   const [users, setUsers] = useState<UserProfile[]>([]); const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -374,27 +437,30 @@ const AdminStudentsTab = () => {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 items-start text-left">
-      <div className="bg-white border-2 border-gray-800 p-4 w-full lg:w-1/3 flex flex-col h-[75vh] theme-card">
+      <div className="bg-white border-2 border-gray-800 rounded-2xl p-4 w-full lg:w-1/3 flex flex-col h-[75vh] theme-card">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Users size={18}/> Annuaire Élèves</h3>
-        <div className="relative mb-4"><Search size={18} className="absolute left-3 top-3 text-gray-400"/><input type="text" placeholder="Rechercher un nom ou mail..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-gray-50 border border-gray-200 outline-none focus:border-amber-500 theme-btn text-sm" /></div>
+        <div className="relative mb-4"><Search size={18} className="absolute left-3 top-3 text-gray-400"/><input type="text" placeholder="Rechercher un nom ou mail..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-amber-500 theme-btn text-sm" /></div>
         <div className="space-y-2 overflow-y-auto flex-1 pr-2">
           {filteredUsers.length === 0 ? <p className="text-center text-sm text-gray-400 py-4">Aucun élève trouvé.</p> : filteredUsers.map(u => (
-            <div key={u.id} className={`flex flex-col p-3 border cursor-pointer transition-colors theme-card ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
-              <div className="flex justify-between items-center mb-1"><span className="font-bold text-sm text-gray-800">{u.displayName}</span>{!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</div>
+            <div key={u.id} className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-colors theme-card ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
+              <div className="flex justify-between items-center mb-1">
+                 <span className="font-bold text-sm text-gray-800 flex items-center gap-2">{u.displayName} {!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</span>
+                 <button onClick={(e) => { e.stopPropagation(); onImpersonate(u.id); }} className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold hover:bg-indigo-200" title="Voir en tant que cet élève">👻</button>
+              </div>
               <span className="text-xs text-gray-500 mb-2 truncate">{u.email}</span>
               <div className="flex gap-2 items-center"><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, false)}} className="w-6 h-6 bg-gray-200 text-xs font-bold hover:bg-gray-300 theme-btn">-</button><span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 shadow-sm theme-btn">{getActiveCredits(u)} cr</span><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, true)}} className="w-6 h-6 bg-amber-200 text-amber-800 text-xs font-bold hover:bg-amber-300 theme-btn">+</button></div>
             </div>
           ))}
         </div>
       </div>
-      <div className="bg-white border border-gray-200 shadow-sm p-6 w-full lg:w-2/3 h-[75vh] flex flex-col theme-card">
+      <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-6 w-full lg:w-2/3 h-[75vh] flex flex-col theme-card">
         {!selectedUser ? (
           <div className="h-full flex items-center justify-center text-gray-400 flex-col gap-3"><User size={48} className="opacity-20"/><p>Sélectionnez un élève dans la liste.</p></div>
         ) : (
           <>
             <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
               <div><h3 className="font-black text-2xl text-gray-900">{selectedUser.displayName}</h3><p className="text-sm text-gray-500 flex items-center gap-2 mt-1"><Phone size={14}/> {selectedUser.phone || 'Non renseigné'}</p></div>
-              <div className="flex gap-2 bg-gray-100 p-1 theme-btn"><button onClick={() => setActiveSubTab('history')} className={`px-4 py-2 text-sm font-bold theme-btn ${activeSubTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Historique & Achats</button><button onClick={() => setActiveSubTab('profile')} className={`px-4 py-2 text-sm font-bold theme-btn ${activeSubTab === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Profil & Mémo</button></div>
+              <div className="flex gap-2 bg-gray-100 p-1 rounded-xl theme-btn"><button onClick={() => setActiveSubTab('history')} className={`px-4 py-2 text-sm font-bold theme-btn ${activeSubTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Historique & Achats</button><button onClick={() => setActiveSubTab('profile')} className={`px-4 py-2 text-sm font-bold theme-btn ${activeSubTab === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Profil & Mémo</button></div>
             </div>
             <div className="flex-1 overflow-y-auto pr-2">
               {activeSubTab === 'history' && (
@@ -404,17 +470,17 @@ const AdminStudentsTab = () => {
                       if (item.type === 'BOOKING') {
                         const b = item.data as BookingInfo;
                         return (
-                          <div key={`b-${b.id}-${idx}`} className="flex justify-between items-center p-4 border border-gray-100 bg-white shadow-sm theme-card">
+                          <div key={`b-${b.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-gray-100 bg-white shadow-sm theme-card">
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-blue-100 text-blue-700 theme-btn">COURS</span><h4 className="font-bold text-gray-800 text-sm">{b.classTitle}</h4></div><p className="text-xs text-gray-500">{new Date(b.date).toLocaleDateString('fr-FR')} à {new Date(b.date).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</p></div>
-                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">{b.paymentMethod}</span><span className={`text-[10px] font-bold px-2 py-1 uppercase theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>}</div>
+                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">{b.paymentMethod}</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && <button onClick={() => generateInvoicePDF(b, selectedUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price })} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>}</div>
                           </div>
                         );
                       } else {
                         const p = item.data as CreditPurchase;
                         return (
-                          <div key={`p-${p.id}-${idx}`} className="flex justify-between items-center p-4 border border-amber-200 bg-amber-50 shadow-sm theme-card">
+                          <div key={`p-${p.id}-${idx}`} className="flex justify-between items-center p-4 rounded-xl border border-amber-200 bg-amber-50 shadow-sm theme-card">
                             <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-amber-200 text-amber-800 theme-btn">BOUTIQUE</span><h4 className="font-bold text-gray-800 text-sm">{p.packName}</h4></div><p className="text-xs text-gray-500">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p></div>
-                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 uppercase theme-btn ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>}</div>
+                            <div className="flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 rounded uppercase theme-btn ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, selectedUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>}</div>
                           </div>
                         );
                       }
@@ -424,10 +490,10 @@ const AdminStudentsTab = () => {
               )}
               {activeSubTab === 'profile' && (
                 <div className="space-y-6">
-                  <div className="bg-gray-50 p-5 border border-gray-100 relative theme-card">
+                  <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100 relative theme-card">
                     {!isEditingProfile ? (
                       <>
-                        <button onClick={() => setIsEditingProfile(true)} className="absolute top-4 right-4 text-amber-600 hover:text-amber-700 bg-amber-50 p-2 font-bold text-xs flex items-center gap-1 theme-btn"><Edit2 size={14}/> Éditer</button>
+                        <button onClick={() => setIsEditingProfile(true)} className="absolute top-4 right-4 text-amber-600 hover:text-amber-700 bg-amber-50 p-2 rounded-lg font-bold text-xs flex items-center gap-1 theme-btn"><Edit2 size={14}/> Éditer</button>
                         <div className="grid grid-cols-2 gap-4">
                           <div><p className="text-xs text-gray-400 font-bold uppercase mb-1">Email</p><p className="text-sm text-gray-800 font-medium">{selectedUser.email}</p></div>
                           <div><p className="text-xs text-gray-400 font-bold uppercase mb-1">Téléphone</p><p className="text-sm text-gray-800 font-medium">{selectedUser.phone || '-'}</p></div>
@@ -440,25 +506,25 @@ const AdminStudentsTab = () => {
                     ) : (
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-3">
-                          <div><label className="text-xs font-bold text-gray-500">Nom complet</label><input value={editProfileData.displayName || ''} onChange={e=>setEditProfileData({...editProfileData, displayName: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-gray-500">Email</label><input value={editProfileData.email || ''} onChange={e=>setEditProfileData({...editProfileData, email: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-gray-500">Téléphone</label><input value={editProfileData.phone || ''} onChange={e=>setEditProfileData({...editProfileData, phone: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-gray-500">Date Naissance</label><input type="date" value={editProfileData.birthDate || ''} onChange={e=>setEditProfileData({...editProfileData, birthDate: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Rue</label><input value={editProfileData.street || ''} onChange={e=>setEditProfileData({...editProfileData, street: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-gray-500">Code Postal</label><input value={editProfileData.zipCode || ''} onChange={e=>setEditProfileData({...editProfileData, zipCode: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-gray-500">Ville</label><input value={editProfileData.city || ''} onChange={e=>setEditProfileData({...editProfileData, city: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-red-500">Contact Urgence</label><input value={editProfileData.emergencyContact || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyContact: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div><label className="text-xs font-bold text-red-500">Tél Urgence</label><input value={editProfileData.emergencyPhone || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyPhone: e.target.value})} className="w-full p-2 border text-sm theme-btn"/></div>
-                          <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Droit à l'image</label><select value={editProfileData.imageRights || ''} onChange={e=>setEditProfileData({...editProfileData, imageRights: e.target.value as any})} className="w-full p-2 border text-sm bg-white theme-btn"><option value="">Non renseigné</option><option value="yes">Oui</option><option value="no">Non</option></select></div>
+                          <div><label className="text-xs font-bold text-gray-500">Nom complet</label><input value={editProfileData.displayName || ''} onChange={e=>setEditProfileData({...editProfileData, displayName: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-gray-500">Email</label><input value={editProfileData.email || ''} onChange={e=>setEditProfileData({...editProfileData, email: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-gray-500">Téléphone</label><input value={editProfileData.phone || ''} onChange={e=>setEditProfileData({...editProfileData, phone: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-gray-500">Date Naissance</label><input type="date" value={editProfileData.birthDate || ''} onChange={e=>setEditProfileData({...editProfileData, birthDate: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Rue</label><input value={editProfileData.street || ''} onChange={e=>setEditProfileData({...editProfileData, street: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-gray-500">Code Postal</label><input value={editProfileData.zipCode || ''} onChange={e=>setEditProfileData({...editProfileData, zipCode: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-gray-500">Ville</label><input value={editProfileData.city || ''} onChange={e=>setEditProfileData({...editProfileData, city: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-red-500">Contact Urgence</label><input value={editProfileData.emergencyContact || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyContact: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div><label className="text-xs font-bold text-red-500">Tél Urgence</label><input value={editProfileData.emergencyPhone || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyPhone: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
+                          <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Droit à l'image</label><select value={editProfileData.imageRights || ''} onChange={e=>setEditProfileData({...editProfileData, imageRights: e.target.value as any})} className="w-full p-2 border rounded-lg text-sm bg-white theme-btn"><option value="">Non renseigné</option><option value="yes">Oui</option><option value="no">Non</option></select></div>
                         </div>
-                        <div className="flex gap-2 pt-2"><button onClick={() => setIsEditingProfile(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold text-sm theme-btn">Annuler</button><button onClick={() => handleSaveAdminProfileEdit(selectedUser)} className="flex-1 py-2 bg-amber-500 text-white font-bold text-sm shadow-md theme-btn">Enregistrer</button></div>
+                        <div className="flex gap-2 pt-2"><button onClick={() => setIsEditingProfile(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg text-sm theme-btn">Annuler</button><button onClick={() => handleSaveAdminProfileEdit(selectedUser)} className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg text-sm shadow-md theme-btn">Enregistrer</button></div>
                       </div>
                     )}
                   </div>
-                  <div className="bg-blue-50 p-5 border border-blue-100 theme-card">
+                  <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100 theme-card">
                     <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2"><Info size={18}/> Mémo Administration (Privé)</h4>
-                    <textarea value={memoText} onChange={e => setMemoText(e.target.value)} placeholder="Ex: Blessure épaule..." className="w-full p-3 border outline-none text-sm min-h-[120px] bg-white border-blue-200 theme-btn"/>
-                    <button onClick={() => handleSaveMemo(selectedUser)} disabled={savingMemo} className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 text-sm shadow-sm theme-btn">{savingMemo ? 'Enregistrement...' : 'Enregistrer le Mémo'}</button>
+                    <textarea value={memoText} onChange={e => setMemoText(e.target.value)} placeholder="Ex: Blessure épaule..." className="w-full p-3 rounded-xl border outline-none text-sm min-h-[120px] bg-white border-blue-200 theme-btn"/>
+                    <button onClick={() => handleSaveMemo(selectedUser)} disabled={savingMemo} className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-sm theme-btn">{savingMemo ? 'Enregistrement...' : 'Enregistrer le Mémo'}</button>
                   </div>
                 </div>
               )}
@@ -466,50 +532,6 @@ const AdminStudentsTab = () => {
           </>
         )}
       </div>
-    </div>
-  );
-};
-
-const AdminClassAttendees = ({ classInfo, onRefresh }: { classInfo: DanceClass, onRefresh: () => void }) => {
-  const [bookings, setBookings] = useState<BookingInfo[]>([]); const [showAddManual, setShowAddManual] = useState(false);
-  const [newManualName, setNewManualName] = useState(''); const [newManualEmail, setNewManualEmail] = useState(''); const [newManualMethod, setNewManualMethod] = useState<PaymentMethod>('CASH');
-
-  useEffect(() => { const unsub = onSnapshot(query(collection(db, "bookings"), where("classId", "==", classInfo.id)), (snap) => setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo)))); return () => unsub(); }, [classInfo.id]);
-  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => { const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID'; const nowStr = new Date().toISOString(); await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }); syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: classInfo.price }); };
-
-  const handleAddManual = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!newManualName) return; let manualId = 'manual_' + Date.now(); let finalName = newManualName + " (Manuel)";
-    try {
-      if (newManualEmail) { const userQuery = await getDocs(query(collection(db, "users"), where("email", "==", newManualEmail.trim().toLowerCase()))); if (!userQuery.empty) { manualId = userQuery.docs[0].id; finalName = userQuery.docs[0].data().displayName; } else { const newUserRef = await addDoc(collection(db, "users"), { email: newManualEmail.trim().toLowerCase(), displayName: newManualName, role: 'student', credits: 0, hasFilledForm: false }); manualId = newUserRef.id; finalName = newManualName; } }
-      await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classInfo.id); const classDoc = await t.get(classRef); const cData = classDoc.data();
-        if(!cData || cData.attendeesCount >= cData.maxCapacity) throw "Cours Complet"; if ((cData.attendeeIds || []).includes(manualId)) throw "Cet élève est déjà inscrit !";
-        t.update(classRef, { attendeesCount: cData.attendeesCount + 1, attendeeIds: [...(cData.attendeeIds || []), manualId] });
-        const dateStr = classInfo.startAt.toLocaleDateString('fr-FR'); const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const paymentStatus = newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING'; const nowStr = new Date().toISOString();
-        t.set(doc(collection(db, "bookings")), { classId: classInfo.id, userId: manualId, userName: finalName, classTitle: classInfo.title, date: classInfo.startAt.toISOString(), dateStr, timeStr, location: classInfo.location, price: classInfo.price, paymentMethod: newManualMethod, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
-      });
-      syncToSheet({ type: 'BOOKING', classId: classInfo.id, classTitle: classInfo.title, date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}), location: classInfo.location, capacity: classInfo.maxCapacity, studentId: manualId, studentName: `${finalName} (${newManualMethod})`, paymentStatus: newManualMethod === 'CREDIT' ? 'PAID' : 'PENDING', price: classInfo.price });
-      setNewManualName(''); setNewManualEmail(''); setShowAddManual(false); onRefresh();
-    } catch(e) { alert(e); }
-  };
-
-  const handleRemoveStudent = async (b: BookingInfo) => {
-    if (!window.confirm(`Supprimer ${b.userName} ?`)) return;
-    try {
-      await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classInfo.id); const classDoc = await t.get(classRef); const cData = classDoc.data(); if(!cData) return;
-        if (b.paymentMethod === 'CREDIT' && !b.userId.startsWith('manual_')) { const userRef = doc(db, "users", b.userId); const userDoc = await t.get(userRef); if (userDoc.exists()) { const u = userDoc.data() as UserProfile; if(u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); } } }
-        t.update(classRef, { attendeesCount: Math.max(0, cData.attendeesCount - 1), attendeeIds: (cData.attendeeIds || []).filter((id: string) => id !== b.userId) }); t.delete(doc(db, "bookings", b.id));
-      });
-      syncToSheet({ type: 'CANCEL', classId: classInfo.id, studentId: b.userId, classTitle: classInfo.title, date: classInfo.startAt.toLocaleDateString('fr-FR'), time: classInfo.startAt.toLocaleTimeString('fr-FR'), location: classInfo.location, studentName: `${b.userName} (${b.paymentMethod})`, price: classInfo.price, paymentStatus: b.paymentStatus });
-      await sendNotification(`Annulation manuelle de ${b.userName} pour ${classInfo.title}`, 'CANCEL'); onRefresh();
-    } catch(e) { alert("Erreur"); }
-  };
-
-  return (
-    <div className="mt-4 border-t border-gray-100 pt-4 space-y-3">
-      {bookings.length === 0 ? <div className="text-center text-gray-400 text-sm">Aucun inscrit.</div> : (<div className="space-y-2">{bookings.map(b => (<div key={b.id} className="flex justify-between items-center bg-gray-50 p-2.5 text-sm text-left border border-gray-100 theme-card"><div className="flex-1"><span className="font-bold text-gray-700 block">{b.userName}</span><span className="text-xs text-gray-500">{b.paymentMethod}</span></div><div className="flex gap-2"><button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center gap-1 px-3 py-1.5 font-bold theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>}</button><button onClick={() => handleRemoveStudent(b)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 theme-btn"><Trash2 size={16}/></button></div></div>))}</div>)}
-      <div className="pt-3 border-t border-gray-200 mt-3">{!showAddManual ? <button type="button" onClick={() => setShowAddManual(true)} className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-sm flex justify-center gap-2 theme-btn"><UserPlus size={16}/> Ajouter manuellement</button> : (<form onSubmit={handleAddManual} className="flex flex-col gap-2 bg-gray-50 p-3 border border-gray-200 theme-card"><div className="flex gap-2"><input value={newManualName} onChange={e=>setNewManualName(e.target.value)} placeholder="Nom complet..." className="flex-1 text-sm p-2 border outline-none theme-btn" /><select value={newManualMethod} onChange={e=>setNewManualMethod(e.target.value as PaymentMethod)} className="text-sm p-2 border bg-white outline-none theme-btn"><option value="CASH">Espèces</option><option value="WERO_RIB">Virement</option><option value="CREDIT">Crédit</option></select></div><input type="email" value={newManualEmail} onChange={e=>setNewManualEmail(e.target.value)} placeholder="Email (Optionnel)" className="w-full text-sm p-2 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2 mt-1"><button type="button" onClick={() => setShowAddManual(false)} className="flex-1 py-2 text-sm font-bold bg-white border theme-btn">Annuler</button><button type="submit" disabled={!newManualName || classInfo.attendeesCount >= classInfo.maxCapacity} className="flex-1 py-2 text-sm font-bold text-white bg-gray-800 disabled:opacity-50 theme-btn">Valider</button></div></form>)}</div>
     </div>
   );
 };
@@ -525,13 +547,13 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
 
   return (
     <div style={cardStyle} className={`bg-white p-5 shadow-sm border-2 relative flex flex-col justify-between text-left theme-card ${!info.color && isBooked ? 'border-amber-400 ring-4 ring-amber-50' : !info.color ? 'border-gray-100' : ''}`}>
-      {(userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') && (<div className="absolute top-3 right-3 flex gap-2"><a href={`http://googleusercontent.com/maps.google.com/search?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-indigo-500"><MapPin size={18}/></a><button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500"><Edit2 size={18}/></button><button onClick={() => { if(confirm("Supprimer ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={18}/></button></div>)}
+      {(userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') && (<div className="absolute top-3 right-3 flex gap-2"><a href={generateGoogleCalendarLink(info.title, info.startAt, info.endAt, info.locationAddress || info.location, info.description || '')} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-blue-500"><CalendarPlus size={18}/></a><button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500"><Edit2 size={18}/></button><button onClick={() => { if(window.confirm("Supprimer ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={18}/></button></div>)}
       <div>
         <div className="flex justify-between items-start mb-4 pr-16 gap-2"><div><h3 className="font-bold text-xl text-gray-800 leading-tight mb-1">{info.title}</h3><p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p></div></div>
-        <div className="flex flex-col items-start mb-3"><div style={timeStyle} className={`text-xl font-black px-3 py-1.5 theme-btn ${!info.color ? 'text-amber-600 bg-amber-50' : ''}`}>{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 rounded-md theme-btn">Tarif : {info.price}</span>}</div>
-        <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded-md mb-3 inline-block theme-btn">Prof : {info.instructor}</span>
+        <div className="flex flex-col items-start mb-3"><div style={timeStyle} className={`text-xl font-black px-3 py-1.5 theme-btn ${!info.color ? 'text-amber-600 bg-amber-50' : ''}`}>{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 theme-btn">Tarif : {info.price}</span>}</div>
+        <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 mb-3 inline-block theme-btn">Prof : {info.instructor}</span>
         {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 border theme-card">{info.description}</p>}
-        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`http://googleusercontent.com/maps.google.com/search?q=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className={`flex gap-1.5 items-center underline ${info.color ? '' : 'hover:text-amber-600'}`} style={info.color ? {color: info.color} : {}}><MapPin size={16}/> {info.location}</a></div>
+        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://google.com/maps/search/?api=1&query=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className={`flex gap-1.5 items-center underline ${info.color ? '' : 'hover:text-amber-600'}`} style={info.color ? {color: info.color} : {}}><MapPin size={16}/> {info.location}</a></div>
       </div>
       {info.externalLink ? (<a href={info.externalLink} target="_blank" rel="noreferrer" style={btnStyle} className={`w-full py-3.5 font-bold text-white text-center block shadow-lg transition-colors theme-btn ${!info.color ? 'bg-green-500 hover:bg-green-600 shadow-green-200' : ''}`}>Réserver sur le site partenaire</a>) : isBooked ? (<button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 theme-btn">Annuler ma réservation</button>) : (<button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} style={(!canBook || isFull || info.endAt < new Date()) ? {} : btnStyle} className={`w-full py-3.5 font-bold text-white theme-btn ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : !info.color ? 'bg-gradient-to-r from-amber-500 to-amber-600 shadow-md hover:opacity-90 transition-opacity' : 'shadow-md hover:opacity-90 transition-opacity'}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>)}
       {(userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') && !info.externalLink && <div className="mt-4"><button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 theme-btn"><Users size={16}/> Inscrits {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button>{showAttendees && <AdminClassAttendees classInfo={info} onRefresh={onRefresh} />}</div>}
@@ -638,7 +660,7 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
   );
 };
 
-const DevAdminTab = ({ themeSettings, users }: any) => {
+const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimRole, simDate, setSimDate }: any) => {
   const [activeModule, setActiveModule] = useState('textes');
   const [settings, setSettings] = useState({
     logoUrl: themeSettings?.logoUrl || '',
@@ -659,12 +681,12 @@ const DevAdminTab = ({ themeSettings, users }: any) => {
   return (
     <div className="p-8 rounded-3xl shadow-xl text-left text-white mt-8" style={{fontFamily: 'sans-serif', backgroundColor: '#111827', borderColor: '#1f2937', borderWidth: '1px'}}>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <div><h2 className="font-black mb-1 flex items-center gap-3 text-2xl" style={{color: '#60a5fa'}}><Code size={28}/> Espace Développeur</h2><p className="text-sm text-gray-400">Outils d'administration avancés et constructeur No-Code.</p></div>
+        <div><h2 className="font-black mb-1 flex items-center gap-3 text-2xl" style={{color: '#60a5fa'}}><Code size={28}/> Espace Développeur</h2><p className="text-sm text-gray-400">Cockpit avancé : Tests, affichage et design.</p></div>
         <button onClick={handleSaveTheme} className="font-black py-3 px-6 rounded-xl shadow-lg transition-colors w-full md:w-auto" style={{backgroundColor: '#2563eb', color: 'white'}}>Publier le design</button>
       </div>
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="w-full lg:w-1/4 flex flex-col gap-2">
-          {[ {id:'textes', icon:<Type size={18}/>, name:'Textes & Logo'}, {id:'formes', icon:<Square size={18}/>, name:'Bordures & Arrondis'}, {id:'popup', icon:<Bell size={18}/>, name:'Outil: Pop-up Élève'} ].map(mod => (
+          {[ {id:'textes', icon:<Type size={18}/>, name:'Textes & Logo'}, {id:'formes', icon:<Square size={18}/>, name:'Bordures & Arrondis'}, {id:'popup', icon:<Bell size={18}/>, name:'Pop-up Élève'}, {id:'visibilite', icon:<EyeOff size={18}/>, name:'Visibilité Dev'}, {id:'simulateur', icon:<Ghost size={18}/>, name:'Simulateur'} ].map(mod => (
             <button key={mod.id} onClick={() => setActiveModule(mod.id)} className={`w-full text-left px-4 py-3 rounded-xl font-bold flex items-center gap-3 transition-colors`} style={{backgroundColor: activeModule === mod.id ? '#2563eb' : '#1f2937', color: activeModule === mod.id ? 'white' : '#9ca3af'}}>{mod.icon} {mod.name}</button>
           ))}
         </div>
@@ -708,10 +730,53 @@ const DevAdminTab = ({ themeSettings, users }: any) => {
           {activeModule === 'popup' && (
             <div className="space-y-4 animate-in fade-in">
               <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Bell className="text-blue-400"/> Forcer une Pop-up Élève</h4>
-              <p className="text-sm text-gray-400 mb-6">Bloque l'écran d'un élève spécifique à sa prochaine connexion avec un message très visible au milieu de l'écran.</p>
+              <p className="text-sm text-gray-400 mb-6">Bloque l'écran d'un élève spécifique à sa prochaine connexion.</p>
               <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Sélectionner l'élève cible</label><select value={selectedUser} onChange={e=>setSelectedUser(e.target.value)} className="w-full p-4 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="">-- Choisir dans la liste --</option>{users.filter((u:any) => u.role !== 'dev-admin').map((u:any) => <option key={u.id} value={u.id}>{u.displayName} ({u.email})</option>)}</select></div>
-              <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Message d'alerte à afficher</label><textarea value={popupMessage} onChange={e=>setPopupMessage(e.target.value)} placeholder="Ex: Salut, n'oublie pas de nous amener ton certificat médical au prochain cours !" className="w-full p-4 rounded-xl text-white min-h-[120px] outline-none focus:border-blue-500" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
+              <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Message d'alerte à afficher</label><textarea value={popupMessage} onChange={e=>setPopupMessage(e.target.value)} placeholder="Ex: N'oublie pas ton certificat médical !" className="w-full p-4 rounded-xl text-white min-h-[120px] outline-none focus:border-blue-500" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
               <button onClick={handleSendPopup} disabled={loading || !selectedUser || !popupMessage} className="text-white font-bold py-4 px-8 rounded-xl disabled:opacity-50 mt-4 transition-colors w-full md:w-auto" style={{backgroundColor: '#2563eb'}}>Programmer l'affichage</button>
+            </div>
+          )}
+          {activeModule === 'visibilite' && (
+            <div className="space-y-6 animate-in fade-in">
+              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><EyeOff className="text-blue-400"/> Nettoyage de l'interface Dev</h4>
+              <p className="text-sm text-gray-400 mb-6">Ces réglages ne s'appliquent qu'à <b>TOI</b>. Ils permettent de cacher les éléments inutiles pour le développement.</p>
+              <div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700">
+                 <label className="flex items-center justify-between cursor-pointer">
+                   <div><p className="font-bold">Cacher l'En-tête (Header)</p><p className="text-[10px] text-gray-500">Masque le logo, "Bonjour", et les boutons profil/déconnexion.</p></div>
+                   <input type="checkbox" checked={devVis.hideHeader} onChange={e=>setDevVis({...devVis, hideHeader: e.target.checked})} className="w-5 h-5 accent-blue-500" />
+                 </label>
+                 <hr className="border-gray-800"/>
+                 <label className="flex items-center justify-between cursor-pointer">
+                   <div><p className="font-bold">Cacher les Boutons Rapides</p><p className="text-[10px] text-gray-500">Masque Insta, Crédits, Boutique et Cloche.</p></div>
+                   <input type="checkbox" checked={devVis.hideIcons} onChange={e=>setDevVis({...devVis, hideIcons: e.target.checked})} className="w-5 h-5 accent-blue-500" />
+                 </label>
+                 <hr className="border-gray-800"/>
+                 <label className="flex items-center justify-between cursor-pointer">
+                   <div><p className="font-bold">Cacher les Onglets Élèves</p><p className="text-[10px] text-gray-500">Masque Accueil, Planning, Mon Historique.</p></div>
+                   <input type="checkbox" checked={devVis.hideTabs} onChange={e=>setDevVis({...devVis, hideTabs: e.target.checked})} className="w-5 h-5 accent-blue-500" />
+                 </label>
+              </div>
+            </div>
+          )}
+          {activeModule === 'simulateur' && (
+            <div className="space-y-6 animate-in fade-in">
+              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Ghost className="text-blue-400"/> Machine à voyager (Tests)</h4>
+              <p className="text-sm text-gray-400 mb-6">Modifie temporairement la réalité de l'application pour tester tes fonctionnalités. <b>Un bouton rouge apparaîtra pour te permettre de quitter ce mode.</b></p>
+              <div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler une date précise</label>
+                  <input type="date" value={simDate} onChange={e=>setSimDate(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} />
+                  <p className="text-[10px] text-gray-500 mt-1">Utile pour voir le bandeau "J-1" ou le clignotement "Cours du jour".</p>
+                </div>
+                <div className="pt-4 border-t border-gray-800">
+                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler un Rôle</label>
+                  <select value={simRole} onChange={e=>setSimRole(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
+                    <option value="">Mon vrai rôle (Dev-Admin)</option>
+                    <option value="admin">Administratrice (Cheffe)</option>
+                    <option value="student">Élève Basique</option>
+                  </select>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -728,12 +793,12 @@ const BoutiqueModal = ({ isOpen, onClose, user, packs }: any) => {
     try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement."); onClose(); } catch (e) {}
   };
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative theme-card"><h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>{packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map((p:any) => (<div key={p.id} className="border border-gray-200 p-4 flex justify-between items-center bg-gray-50 theme-card"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 theme-btn">Acheter</button></div></div>))}</div>)}<button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 theme-btn">Fermer</button></div></div>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative theme-card"><h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>{packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map((p:any) => (<div key={p.id} className="border border-gray-200 p-4 flex justify-between items-center bg-gray-50 theme-card"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 theme-btn">Commander</button></div></div>))}</div>)}<button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 theme-btn">Fermer</button></div></div>
   );
 };
 
 const PaymentInfoModal = ({ isOpen, onClose }: any) => {
-  if (!isOpen) return null; return (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200 theme-card"><h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3><p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p><div className="bg-gray-50 p-4 border border-gray-200 mb-4 space-y-4 theme-card"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero/Paypal :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">0621056414</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div><div className="bg-amber-50 text-amber-800 p-3 text-sm font-bold flex items-start gap-2 border border-amber-100 theme-card"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p></div><button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors theme-btn">Fermer</button></div></div>);
+  if (!isOpen) return null; return (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200 theme-card"><h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet className="text-amber-600"/> Moyens de paiement</h3><p className="text-sm text-gray-600 mb-4">Tu peux régler ton cours dès maintenant via :</p><div className="bg-gray-50 p-4 border border-gray-200 mb-4 space-y-4 theme-card"><div><span className="font-bold text-gray-800 flex items-center gap-2"><Smartphone size={16} className="text-blue-500"/> Wero/PayPal :</span><p className="text-lg font-mono font-bold text-gray-700 mt-1 select-all">0621056414</p></div><hr className="border-gray-200"/><div><span className="font-bold text-gray-800 flex items-center gap-2"><Building size={16} className="text-indigo-500"/> Virement :</span><p className="text-sm font-mono font-bold text-gray-700 mt-1 break-all select-all">FR2120041010052736887X02624</p></div></div><div className="bg-amber-50 text-amber-800 p-3 text-sm font-bold flex items-start gap-2 border border-amber-100 theme-card"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Ajout obligatoire du motif :<br/><span className="text-amber-900 font-black">Nom prénom + date du cours</span></p></div><button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors theme-btn">Fermer</button></div></div>);
 };
 
 const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
@@ -749,7 +814,7 @@ const UserProfileForm = ({ user, onClose }: any) => {
     e.preventDefault(); if (isFirstTime) { if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); }
     setSaving(true); try { await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true }); await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, adminMemo: user.adminMemo || '', ...formData }); if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅"); onClose(); } catch (e) { alert("Erreur."); } setSaving(false);
   };
-  return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative theme-card"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 mb-4 text-sm text-gray-500 border theme-card"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Coordonnées</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border outline-none focus:border-amber-500 theme-btn" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border outline-none focus:border-amber-500 theme-btn" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold theme-btn">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-amber-500 text-white font-bold shadow-lg disabled:opacity-50 theme-btn">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
+  return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative theme-card"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 mb-4 text-sm text-gray-500 border theme-card"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Date de Naissance et Téléphone</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border outline-none focus:border-amber-500 theme-btn" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border outline-none focus:border-amber-500 theme-btn" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold theme-btn">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-amber-500 text-white font-bold shadow-lg disabled:opacity-50 theme-btn">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
 };
 
 const LoginScreen = () => {
@@ -779,8 +844,14 @@ const LoginScreen = () => {
 };
 
 export default function App() {
+  // L'ÉTAT DU SIMULATEUR (MACHINE À VOYAGER / MODE FANTÔME)
+  const [simulatedDate, setSimulatedDate] = useState<string>('');
+  const [simulatedRole, setSimulatedRole] = useState<string>('');
+  const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
+  const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
+
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'accueil'|'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'|'dev_admin'>('accueil');
+  const [activeTab, setActiveTab] = useState<'accueil'|'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'|'dev_admin'|'admin_today'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
@@ -794,14 +865,18 @@ export default function App() {
   const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
   const [devUsers, setDevUsers] = useState<UserProfile[]>([]);
   
+  // CALCUL DES RÔLES EFFECTIFS (Avec le Simulateur)
+  const isRealDevAdmin = userProfile?.role === 'dev-admin';
+  const effectiveUser = impersonatedUserId ? devUsers.find(u => u.id === impersonatedUserId) || userProfile : userProfile;
+  const isAdmin = simulatedRole === 'admin' || (simulatedRole === '' && (effectiveUser?.role === 'admin' || effectiveUser?.role === 'dev-admin'));
+  const todayDate = simulatedDate ? new Date(simulatedDate) : new Date();
+  
   const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING') || myPurchases.some(p => p.status === 'PENDING');
   const [hasInvoiceAlert, setHasInvoiceAlert] = useState(false);
-  const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'dev-admin';
-  const isDevAdmin = userProfile?.role === 'dev-admin';
 
   useEffect(() => {
-    if (isAdmin) { const now = new Date().getTime(); const alert = allBookings.some(b => { if (b.paymentMethod === 'CREDIT') return false; const isPast = new Date(b.date).getTime() < now; if (b.paymentStatus === 'PENDING' && isPast) return true; if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; return false; }) || allPurchases.some(p => p.status === 'PENDING'); setHasInvoiceAlert(alert); }
-  }, [allPurchases, allBookings, isAdmin]);
+    if (isAdmin) { const now = todayDate.getTime(); const alert = allBookings.some(b => { if (b.paymentMethod === 'CREDIT') return false; const isPast = new Date(b.date).getTime() < now; if (b.paymentStatus === 'PENDING' && isPast) return true; if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; return false; }) || allPurchases.some(p => p.status === 'PENDING'); setHasInvoiceAlert(alert); }
+  }, [allPurchases, allBookings, isAdmin, simulatedDate]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -841,60 +916,62 @@ export default function App() {
     }
   }, [isAdmin]);
 
-  const fetchAllData = async () => { const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); const now = new Date(); setClasses(all.filter(c => c.endAt && c.endAt > now)); setPastClasses(all.filter(c => c.endAt && c.endAt <= now).reverse()); };
+  const fetchAllData = async () => { const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); setClasses(all.filter(c => c.endAt && c.endAt > todayDate)); setPastClasses(all.filter(c => c.endAt && c.endAt <= todayDate).reverse()); };
   
   useEffect(() => { 
     fetchAllData(); 
     onSnapshot(doc(db, "settings", "general"), (docSnap) => { if (docSnap.exists()) { const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); }); 
     onSnapshot(doc(db, "settings", "theme"), (docSnap) => { if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); });
-  }, []);
+  }, [simulatedDate]);
 
-  useEffect(() => { if (userProfile) { const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", userProfile.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", userProfile.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [userProfile]);
-  useEffect(() => { if (isDevAdmin) { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [isDevAdmin]);
+  useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
+  useEffect(() => { if (isRealDevAdmin) { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [isRealDevAdmin]);
 
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
   const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
   const confirmBooking = async (method: PaymentMethod) => {
-    const classId = paymentModal.classId; if (!classId || !userProfile) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
+    const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
     try {
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
-        if (!classData || !userData) throw "Erreur DB"; if ((classData.attendeeIds || []).includes(userProfile.id)) throw "Déjà inscrit !"; if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
+        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        if (!classData || !userData) throw "Erreur DB"; if ((classData.attendeeIds || []).includes(effectiveUser.id)) throw "Déjà inscrit !"; if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
         let newPacks = userData.creditPacks ? [...userData.creditPacks] : [];
-        if (method === 'CREDIT') { const now = new Date().getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
-        t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...(classData.attendeeIds||[]), userProfile.id] });
-        const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING'; const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR'); const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const nowStr = new Date().toISOString();
-        t.set(doc(collection(db, "bookings")), { classId, userId: userProfile.id, userName: userProfile.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
+        if (method === 'CREDIT') { const now = todayDate.getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
+        t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...(classData.attendeeIds||[]), effectiveUser.id] });
+        const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING'; const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR'); const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const nowStr = todayDate.toISOString();
+        t.set(doc(collection(db, "bookings")), { classId, userId: effectiveUser.id, userName: effectiveUser.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
         return { classTarget: { id: classId, ...classData, startAt: classData.startAt.toDate(), endAt: classData.endAt.toDate() } as DanceClass, dateStr, timeStr, method, paymentStatus };
-      }).then((d) => { syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: userProfile.id, studentName: `${userProfile.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); sendNotification(`Nouvelle réservation : ${userProfile.displayName} pour ${d.classTarget.title}`, 'BOOKING'); setBookingSuccessData(d.classTarget); fetchAllData(); });
+      }).then((d) => { syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: effectiveUser.id, studentName: `${effectiveUser.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); sendNotification(`Nouvelle réservation : ${effectiveUser.displayName} pour ${d.classTarget.title}`, 'BOOKING'); setBookingSuccessData(d.classTarget); fetchAllData(); });
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
   const handleCancel = async (classId: string) => {
-    if (!userProfile || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
+    if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
     try {
-      const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", userProfile.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
+      const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus; }
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", userProfile.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
         if (!classData || !userData) throw "Erreur DB"; if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { const updatedPacks = [...userData.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); }
-        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== userProfile.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
+        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
       const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
-      if(cTarget) { syncToSheet({ type: 'CANCEL', classId, studentId: userProfile.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${userProfile.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); sendNotification(`Annulation : ${userProfile.displayName} a annulé ${cTarget.title}`, 'CANCEL'); }
+      if(cTarget) { syncToSheet({ type: 'CANCEL', classId, studentId: effectiveUser.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${effectiveUser.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); sendNotification(`Annulation : ${effectiveUser.displayName} a annulé ${cTarget.title}`, 'CANCEL'); }
       alert("Réservation annulée !"); fetchAllData();
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
   const handleCancelBoutiqueOrder = async (id: string) => { if (!window.confirm("Es-tu sûre de vouloir annuler cette commande ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); alert("Commande annulée !"); } catch(e) { alert("Erreur."); } };
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
-
-  const closeUserPopup = async () => {
-      if (!userProfile) return;
-      try { await updateDoc(doc(db, "users", userProfile.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' }); } catch (e) { console.error(e); }
-  };
+  const closeUserPopup = async () => { if (!effectiveUser) return; try { await updateDoc(doc(db, "users", effectiveUser.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' } as UserProfile); } catch (e) { console.error(e); } };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return <LoginScreen />;
-  const activeCreds = userProfile ? getActiveCredits(userProfile) : 0; const unreadNotifs = notifications.filter(n => !n.read).length;
+
+  const activeCreds = effectiveUser ? getActiveCredits(effectiveUser) : 0; 
+  const unreadNotifs = notifications.filter(n => !n.read).length;
+  const hasClassToday = classes.some(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayDate.toLocaleDateString('fr-FR'));
+
+  const tomorrow = new Date(todayDate); tomorrow.setDate(tomorrow.getDate() + 1); const tomorrowStr = tomorrow.toLocaleDateString('fr-FR');
+  const hasClassTomorrow = myBookings.some(b => new Date(b.date).toLocaleDateString('fr-FR') === tomorrowStr);
 
   const tHomeStr = themeSettings?.tabHome || 'Accueil';
   const tPlanStr = themeSettings?.tabPlanning || 'Planning';
@@ -902,7 +979,7 @@ export default function App() {
   const tLogo = themeSettings?.logoUrl || '';
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8 text-gray-900 pb-32 text-left w-full transition-all duration-300">
+    <div className="min-h-screen bg-gray-50 p-3 sm:p-4 md:p-8 text-gray-900 pb-32 text-left w-full transition-all duration-300">
       <style dangerouslySetInnerHTML={{__html: `
         :root {
           --app-font: ${themeSettings?.fontFamily || 'ui-sans-serif, system-ui, sans-serif'};
@@ -910,54 +987,108 @@ export default function App() {
           --app-card-radius: ${themeSettings?.cardRadius || '16px'};
           --app-btn-radius: ${themeSettings?.btnRadius || '12px'};
         }
+        @keyframes flash-vif { 0%, 100% { background-color: #ef4444; color: white; border-color: #fca5a5; transform: scale(1); } 50% { background-color: #f59e0b; color: black; border-color: #fde68a; transform: scale(1.02); } }
+        .animate-flash-vif { animation: flash-vif 1.5s infinite; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         body, .min-h-screen { font-family: var(--app-font) !important; font-size: var(--app-font-size) !important; }
         .theme-card { border-radius: var(--app-card-radius) !important; }
         .theme-btn { border-radius: var(--app-btn-radius) !important; font-family: var(--app-font) !important; }
       `}} />
-      <div className="w-full max-w-[1500px] mx-auto">
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 py-4 border-b border-gray-200 relative">
-          <div className="flex items-center gap-4">
-             {tLogo ? <img src={tLogo} className="h-14 object-contain drop-shadow-sm" alt="Logo"/> : (authUser?.photoURL && <img src={authUser.photoURL} className="w-14 h-14 rounded-full border-2 border-amber-200 shadow-sm"/>)}
-             <div>
-               <h1 className="text-xl font-bold text-gray-900 leading-tight">Bonjour {authUser?.displayName?.split(' ')[0]}</h1>
-               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm mt-2">
-                 <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-4 py-1.5 transition-all border-2 theme-btn ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-500 animate-pulse' : 'bg-white text-gray-700 border-gray-200'}`}>Moyens de paiement</button>
-                 <button onClick={() => setShowProfile(true)} className="text-gray-500 font-medium hover:text-amber-600">Mon Profil</button>
-                 <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
+      <div className="w-full max-w-[1500px] mx-auto relative">
+        
+        {/* BOUÉE DE SAUVETAGE POUR LE SIMULATEUR */}
+        {(simulatedRole || simulatedDate || impersonatedUserId) && (
+           <button onClick={() => {setSimulatedRole(''); setSimulatedDate(''); setImpersonatedUserId('');}} className="fixed bottom-6 right-6 z-[9999] bg-red-600 hover:bg-red-700 text-white font-black px-6 py-4 rounded-full shadow-2xl flex gap-2 items-center animate-bounce border-4 border-red-200">
+              🔴 Quitter Mode Test
+           </button>
+        )}
+
+        {!devVis.hideHeader && (
+          <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6 py-3 sm:py-4 border-b border-gray-200 relative">
+            <div className="flex items-center gap-3 sm:gap-4">
+               {tLogo ? <img src={tLogo} className="h-10 sm:h-14 object-contain drop-shadow-sm" alt="Logo"/> : (authUser?.photoURL && <img src={authUser.photoURL} className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 border-amber-200 shadow-sm"/>)}
+               <div>
+               <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight flex items-center gap-2">
+  Bonjour {
+    impersonatedUserId 
+    ? effectiveUser?.displayName?.split(' ')[0] 
+    : authUser?.displayName?.split(' ')[0]
+  }
+  {impersonatedUserId && (
+    <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black animate-pulse">
+      👻 MODE FANTÔME
+    </span>
+  )}
+</h1>
+                 <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-1 sm:gap-y-2 text-xs sm:text-sm mt-1 sm:mt-2">
+                   <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-3 py-1 sm:px-4 sm:py-1.5 transition-all border-2 theme-btn ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-500 animate-pulse' : 'bg-white text-gray-700 border-gray-200'}`}>Moyens de paiement</button>
+                   <button onClick={() => setShowProfile(true)} className="text-gray-500 font-medium hover:text-amber-600">Mon Profil</button>
+                   <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
+                 </div>
                </div>
-             </div>
-          </div>
-          <div className="flex gap-3 items-center self-start sm:self-auto flex-wrap">
-            {isAdmin && (
-              <div className="relative">
-                <button onClick={() => setShowNotifications(!showNotifications)} className="p-3 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 relative theme-btn"><Bell size={20} className="text-gray-600"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
-                {showNotifications && (<div className="absolute top-14 left-0 sm:left-auto sm:right-0 w-80 max-w-[90vw] bg-white shadow-2xl border border-gray-200 z-50 overflow-hidden theme-card"><div className="p-3 bg-gray-50 border-b font-bold text-gray-800">Notifications</div><div className="max-h-64 overflow-y-auto">{notifications.length === 0 ? <p className="p-4 text-center text-sm text-gray-500">Aucune notification.</p> : notifications.map(n => (<div key={n.id} onClick={() => markNotifRead(n.id)} className={`p-3 border-b text-sm cursor-pointer ${n.read ? 'text-gray-500 bg-white' : 'text-gray-900 bg-blue-50 font-medium'}`}><p>{n.text}</p><span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleString('fr-FR')}</span></div>))}</div></div>)}
+            </div>
+            {!devVis.hideIcons && (
+              <div className="flex gap-2 sm:gap-3 items-center self-start sm:self-auto flex-wrap w-full sm:w-auto mt-2 sm:mt-0">
+                {isAdmin && (
+                  <div className="relative">
+                    <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 sm:p-3 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 relative theme-btn"><Bell size={18} className="text-gray-600 sm:w-5 sm:h-5"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
+                    {showNotifications && (<div className="absolute top-12 sm:top-14 left-0 sm:left-auto sm:right-0 w-[calc(100vw-24px)] sm:w-80 bg-white shadow-2xl border border-gray-200 z-50 overflow-hidden theme-card"><div className="p-3 bg-gray-50 border-b font-bold text-gray-800">Notifications</div><div className="max-h-64 overflow-y-auto">{notifications.length === 0 ? <p className="p-4 text-center text-sm text-gray-500">Aucune notification.</p> : notifications.map(n => (<div key={n.id} onClick={() => markNotifRead(n.id)} className={`p-3 border-b text-sm cursor-pointer ${n.read ? 'text-gray-500 bg-white' : 'text-gray-900 bg-blue-50 font-medium'}`}><p>{n.text}</p><span className="text-[10px] text-gray-400">{new Date(n.date).toLocaleString('fr-FR')}</span></div>))}</div></div>)}
+                  </div>
+                )}
+                
+                {(!isAdmin || !hasClassToday) && (
+                  <>
+                    <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-2 sm:p-3 bg-white border border-gray-200 shadow-sm transition-colors text-pink-600 hover:bg-pink-50 theme-btn" title="Instagram Vertic'Ali"><Instagram size={18} className="sm:w-5 sm:h-5"/></a>
+                    <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
+                    <button onClick={() => setBoutiqueOpen(true)} className="flex-1 sm:flex-none px-3 py-2 sm:px-4 sm:py-2.5 text-white shadow-md text-xs sm:text-sm font-bold flex justify-center gap-1.5 sm:gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={16} className="sm:w-[18px] sm:h-[18px]" /> Boutique</button>
+                  </>
+                )}
+                {(isAdmin && hasClassToday) && (
+                  <button onClick={() => setActiveTab('admin_today')} className="flex-1 sm:flex-none px-4 py-2 sm:py-2.5 shadow-xl text-xs sm:text-sm font-black flex justify-center gap-2 items-center animate-flash-vif theme-btn border-2"><Clock size={18} className="sm:w-5 sm:h-5" /> COURS DU JOUR !</button>
+                )}
               </div>
             )}
-            <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-3 bg-white border border-gray-200 shadow-sm transition-colors text-pink-600 hover:bg-pink-50 theme-btn" title="Instagram Vertic'Ali"><Instagram size={20}/></a>
-            <div className="px-4 py-2.5 bg-white border border-gray-200 shadow-sm text-lg font-black flex gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={20} className="fill-amber-600" /> {activeCreds}</div>
-            <button onClick={() => setBoutiqueOpen(true)} className="px-4 py-2.5 text-white shadow-md text-sm font-bold flex gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={18} /> Boutique</button>
-          </div>
-        </header>
+          </header>
+        )}
 
-        {userProfile && !userProfile.hasFilledForm && (
-          <div className="bg-red-50 border-2 border-red-200 p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm theme-card">
-            <div className="flex items-center gap-4 text-red-800 font-medium text-base"><div className="p-3 bg-red-100 rounded-full"><AlertTriangle size={28} className="text-red-600" /></div><div><p className="font-bold text-lg mb-1">Dernière étape !</p><p className="text-sm opacity-90">Pour pouvoir réserver ton premier cours, tu dois obligatoirement compléter tes coordonnées et accepter le règlement.</p></div></div>
-            <button onClick={() => setShowProfile(true)} className="w-full md:w-auto px-8 py-4 bg-red-600 hover:bg-red-700 text-white text-sm font-black shadow-lg flex justify-center gap-2 theme-btn"><UserPlus size={18}/> Compléter mon profil</button>
+        {/* BANDEAU J-1 (Si un cours est prévu demain pour l'élève) */}
+        {hasClassTomorrow && !isAdmin && (
+           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-4 sm:p-5 rounded-2xl mb-6 shadow-md flex items-center gap-4 theme-card">
+              <span className="text-3xl sm:text-4xl">🎒</span>
+              <div><p className="font-black text-lg sm:text-xl">Prépare ton sac !</p><p className="text-xs sm:text-sm font-medium opacity-90">Tu as un cours prévu avec nous demain. N'oublie pas ta gourde !</p></div>
+           </div>
+        )}
+
+        {effectiveUser && !effectiveUser.hasFilledForm && (
+          <div className="bg-red-50 border-2 border-red-200 p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 shadow-sm theme-card">
+            <div className="flex items-center gap-3 sm:gap-4 text-red-800 font-medium text-sm sm:text-base"><div className="p-2 sm:p-3 bg-red-100 rounded-full"><AlertTriangle size={24} className="text-red-600 sm:w-7 sm:h-7" /></div><div><p className="font-bold text-base sm:text-lg mb-0.5 sm:mb-1">Dernière étape !</p><p className="text-xs sm:text-sm opacity-90">Pour réserver, tu dois obligatoirement compléter tes coordonnées.</p></div></div>
+            <button onClick={() => setShowProfile(true)} className="w-full md:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-black shadow-lg flex justify-center gap-2 theme-btn"><UserPlus size={16} className="sm:w-[18px] sm:h-[18px]"/> Compléter mon profil</button>
           </div>
         )}
 
-        <nav className="flex overflow-x-auto hide-scrollbar gap-2 mb-8 bg-white p-2 shadow-sm border border-gray-100 theme-card">
-          <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-2 px-6 py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> {tHomeStr}</button>
-          <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-2 px-6 py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={18}/> {tPlanStr}</button>
-          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={18}/> {tHistStr}</button>
+        {!devVis.hideTabs && (
+          <nav className="flex overflow-x-auto hide-scrollbar gap-1 sm:gap-2 mb-6 sm:mb-8 bg-white p-1.5 shadow-sm border border-gray-100 theme-card">
+          <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tHomeStr}</span></button>
+          <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tPlanStr}</span></button>
+          {!isAdmin && <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tHistStr}</span></button>}
+          
           {isAdmin && (
-            <><div className="w-px bg-gray-200 my-2 mx-2"></div><button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-6 py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><LayoutDashboard size={18}/> Tableau de Bord</button><button onClick={() => setActiveTab('admin_invoices')} className={`flex gap-2 px-6 py-3 font-bold whitespace-nowrap theme-btn ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><FileText size={18}/> Factures & Boutique</button><button onClick={() => setActiveTab('admin_students')} className={`flex gap-2 px-6 py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_students' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Users size={18}/> Tous les Élèves</button><button onClick={() => setActiveTab('admin_past')} className={`flex gap-2 px-6 py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_past' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Archive size={18}/> Cours Passés</button><button onClick={() => setActiveTab('admin_settings')} className={`flex gap-2 px-6 py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Settings size={18}/> Réglages</button></>
+            <>
+              <div className="w-px bg-gray-200 my-1 sm:my-2 mx-1 shrink-0"></div>
+              <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><LayoutDashboard size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Tableau de Bord</span></button>
+              <button onClick={() => setActiveTab('admin_invoices')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><FileText size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Factures</span></button>
+              <button onClick={() => setActiveTab('admin_students')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_students' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Users size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Élèves</span></button>
+              <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_past' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Archive size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Archives</span></button>
+              <button onClick={() => setActiveTab('admin_today')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_today' ? 'bg-amber-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Clock size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Cours du jour</span></button>
+              <button onClick={() => setActiveTab('admin_settings')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Settings size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Réglages</span></button>
+            </>
           )}
-          {isDevAdmin && (
-             <button onClick={() => setActiveTab('dev_admin')} className="flex gap-2 px-6 py-3 font-bold whitespace-nowrap ml-auto transition-colors" style={activeTab === 'dev_admin' ? {backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'} : {backgroundColor: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '12px'}}><Code size={18}/> Espace Développeur</button>
+          {isRealDevAdmin && (
+             <button onClick={() => setActiveTab('dev_admin')} className="flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap ml-auto transition-colors" style={activeTab === 'dev_admin' ? {backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'} : {backgroundColor: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '12px'}}><Code size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Dev</span></button>
           )}
         </nav>
+        )}
 
         {activeTab === 'accueil' && (
           <div className="bg-white shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row mb-8 theme-card">
@@ -969,7 +1100,7 @@ export default function App() {
         {activeTab === 'planning' && (
           <div>
             {isAdmin && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
-            {classes.length === 0 ? ( <div className="bg-white p-10 text-center text-gray-400 theme-card">Aucun cours à venir.</div> ) : (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">{classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={userProfile} isBooked={c.attendeeIds?.includes(userProfile?.id || '')} onRefresh={fetchAllData} />)}</div>)}
+            {classes.length === 0 ? ( <div className="bg-white p-10 text-center text-gray-400 theme-card">Aucun cours à venir.</div> ) : (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">{classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={effectiveUser} isBooked={c.attendeeIds?.includes(effectiveUser?.id || '')} onRefresh={fetchAllData} />)}</div>)}
           </div>
         )}
 
@@ -980,10 +1111,10 @@ export default function App() {
                 {userTimeline.map((item, idx) => {
                   if (item.type === 'BOOKING') {
                     const b = item.data as BookingInfo;
-                    return (<div key={`hist-b-${b.id}-${idx}`} className="flex justify-between items-center p-4 border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow theme-card"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-blue-100 text-blue-700 theme-btn">COURS</span><h3 className="font-bold text-gray-800">{b.classTitle}</h3></div><p className="text-sm text-gray-500 capitalize">{new Date(b.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'})}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">Via {b.paymentMethod}</span><span className={`text-xs font-bold px-2 py-1 theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && (<button onClick={async () => { await generateInvoicePDF(b, userProfile, { title: b.classTitle, startAt: new Date(b.date), price: b.price }); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 hover:bg-indigo-100 transition-colors theme-btn"><Download size={14}/> Ma facture</button>)}</div></div>);
+                    return (<div key={`hist-b-${b.id}-${idx}`} className="flex justify-between items-center p-4 border border-gray-100 bg-white shadow-sm hover:shadow-md transition-shadow theme-card"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-blue-100 text-blue-700 theme-btn">COURS</span><h3 className="font-bold text-gray-800">{b.classTitle}</h3></div><p className="text-sm text-gray-500 capitalize">{new Date(b.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'})}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-xs font-bold text-gray-500">Via {b.paymentMethod}</span><span className={`text-xs font-bold px-2 py-1 theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span></div>{b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT' && (<button onClick={async () => { await generateInvoicePDF(b, effectiveUser, { title: b.classTitle, startAt: new Date(b.date), price: b.price }); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className="flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 hover:bg-indigo-100 transition-colors theme-btn"><Download size={14}/> Ma facture</button>)}</div></div>);
                   } else {
                     const p = item.data as CreditPurchase; const expiryDate = new Date(p.date); expiryDate.setDate(expiryDate.getDate() + p.validityDays);
-                    return (<div key={`hist-p-${p.id}-${idx}`} className="flex justify-between items-center p-4 border border-amber-200 bg-amber-50 shadow-sm hover:shadow-md transition-shadow theme-card"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-amber-200 text-amber-900 theme-btn">BOUTIQUE</span><h3 className="font-bold text-gray-800">{p.packName}</h3></div><p className="text-sm text-gray-600">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p><p className="text-xs font-medium mt-0.5 text-amber-700">Valide jusqu'au {expiryDate.toLocaleDateString('fr-FR')}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-xs font-bold px-2 py-1 theme-btn ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' ? (<button onClick={() => generatePackInvoicePDF(p, userProfile)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>) : (<button onClick={() => handleCancelBoutiqueOrder(p.id)} className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 hover:bg-red-100 transition-colors theme-btn"><Trash2 size={12}/> Annuler la commande</button>)}</div></div>);
+                    return (<div key={`hist-p-${p.id}-${idx}`} className="flex justify-between items-center p-4 border border-amber-200 bg-amber-50 shadow-sm hover:shadow-md transition-shadow theme-card"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 bg-amber-200 text-amber-900 theme-btn">BOUTIQUE</span><h3 className="font-bold text-gray-800">{p.packName}</h3></div><p className="text-sm text-gray-600">Acheté le {new Date(p.date).toLocaleDateString('fr-FR')}</p><p className="text-xs font-medium mt-0.5 text-amber-700">Valide jusqu'au {expiryDate.toLocaleDateString('fr-FR')}</p></div><div className="text-right flex flex-col items-end gap-2"><div className="flex items-center gap-2"><span className="text-sm font-black text-amber-600">{p.price} €</span><span className={`text-[10px] font-bold px-2 py-1 theme-btn ${p.status === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{p.status === 'PAID' ? 'Payé' : 'À régler'}</span></div>{p.status === 'PAID' && <button onClick={() => generatePackInvoicePDF(p, effectiveUser)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 hover:bg-indigo-100 transition-colors theme-btn"><Download size={12}/> Facture PDF</button>}</div></div>);
                   }
                 })}
               </div>
@@ -991,33 +1122,33 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} />}
-        {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab />}
-        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab />}
-        {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={userProfile} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
+        {activeTab === 'admin_today' && isAdmin && <AdminTodayTab classes={[...classes, ...pastClasses]} users={devUsers} today={todayDate} bookings={allBookings} />}
+        {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
+        {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
+        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab onImpersonate={(id) => {setImpersonatedUserId(id); setActiveTab('planning');}} />}
+        {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
         {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} />}
-        {activeTab === 'dev_admin' && isDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} />}
+        {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
       </div>
 
-      {showProfile && userProfile && <UserProfileForm user={userProfile} onClose={() => setShowProfile(false)}/>}
+      {showProfile && effectiveUser && <UserProfileForm user={effectiveUser} onClose={() => setShowProfile(false)}/>}
       <PaymentModal isOpen={paymentModal.isOpen} onClose={() => setPaymentModal({isOpen:false, classId:null})} onConfirm={confirmBooking} userCredits={activeCreds}/>
       <PaymentInfoModal isOpen={isPaymentInfoOpen} onClose={() => setPaymentInfoOpen(false)} />
-      {userProfile && <BoutiqueModal isOpen={isBoutiqueOpen} onClose={() => setBoutiqueOpen(false)} user={userProfile} packs={creditPacks} />}
+      {effectiveUser && <BoutiqueModal isOpen={isBoutiqueOpen} onClose={() => setBoutiqueOpen(false)} user={effectiveUser} packs={creditPacks} />}
       
-      {/* POPUP PERSONNALISEE (ENVOYEE DEPUIS DEV-ADMIN) */}
-      {userProfile?.pendingPopup && (
+      {effectiveUser?.pendingPopup && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4 text-center">
            <div className="bg-white p-8 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-300 theme-card">
              <Bell className="mx-auto text-amber-500 mb-4 animate-bounce" size={48}/>
              <h3 className="text-2xl font-black text-gray-900 mb-4">Nouveau Message</h3>
-             <p className="text-gray-600 mb-8 whitespace-pre-wrap text-lg font-medium">{userProfile.pendingPopup}</p>
+             <p className="text-gray-600 mb-8 whitespace-pre-wrap text-lg font-medium">{effectiveUser.pendingPopup}</p>
              <button onClick={closeUserPopup} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-lg transition-colors text-lg theme-btn">J'ai compris</button>
            </div>
         </div>
       )}
 
       {bookingSuccessData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200 theme-card"><h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3><p className="text-gray-600 mb-4 font-medium">Ta place est confirmée pour le cours.</p><div className="bg-amber-50 p-4 mb-4 border border-amber-100 theme-card"><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel</h4><ul className="text-sm text-amber-800 space-y-1 mb-4 list-disc pl-5"><li>Short court + brassière</li><li>Tapis de yoga (si tu en as un)</li><li>Gourde d'eau</li></ul><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter</h4><ul className="text-sm text-amber-800 space-y-1 list-none"><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Retire tes bijoux.</li><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Pas de crème/huile sur le corps !</li></ul></div><div className="flex flex-col gap-3"><a href={generateGoogleCalendarLink(bookingSuccessData.title, bookingSuccessData.startAt, bookingSuccessData.endAt, bookingSuccessData.locationAddress || bookingSuccessData.location, bookingSuccessData.description || '')} target="_blank" rel="noreferrer" onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 flex justify-center gap-2 theme-btn"><CalendarPlus size={20}/> Ajouter à mon Agenda</a><button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-bold transition-opacity theme-btn">J'ai compris !</button></div></div></div>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200 theme-card"><h3 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><CheckCircle className="text-green-500" size={28}/> Réservé ! 🎉</h3><p className="text-gray-600 mb-4 font-medium">Ta place est confirmée pour le cours.</p><div className="bg-amber-50 p-4 mb-4 border border-amber-100 theme-card"><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><ShoppingBag size={18}/> Matériel</h4><ul className="text-sm text-amber-800 space-y-1 mb-4 list-disc pl-5"><li>Short court + brassière</li><li>Tapis de yoga (si tu en possèdes un)</li><li>Gourde d'eau</li></ul><h4 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><AlertTriangle size={18}/> À noter</h4><ul className="text-sm text-amber-800 space-y-1 list-none"><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Retire tes bijoux.</li><li className="flex gap-2"><XCircle size={16} className="text-red-500 shrink-0"/> Pas de crème/huile sur le corps !</li></ul></div><div className="flex flex-col gap-3"><a href={generateGoogleCalendarLink(bookingSuccessData.title, bookingSuccessData.startAt, bookingSuccessData.endAt, bookingSuccessData.locationAddress || bookingSuccessData.location, bookingSuccessData.description || '')} target="_blank" rel="noreferrer" onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 flex justify-center gap-2 theme-btn"><CalendarPlus size={20}/> Ajouter à mon Agenda</a><button onClick={() => setBookingSuccessData(null)} className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-bold transition-opacity theme-btn">J'ai compris !</button></div></div></div>
       )}
     </div>
   );
