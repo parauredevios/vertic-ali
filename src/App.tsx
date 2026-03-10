@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Palette, Type, Square, MessageSquare, Mail, EyeOff, Ghost
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -34,7 +34,8 @@ interface UserProfile {
   id: string; email: string; displayName: string; role: 'student' | 'admin' | 'dev-admin';
   birthDate?: string; street?: string; zipCode?: string; city?: string; phone?: string; emergencyContact?: string; emergencyPhone?: string;
   hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string; credits?: number; pendingPopup?: string;
-  creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];
+  creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];currentLevel?: number;
+  validatedObjectives?: string[];
 }
 
 interface BookingInfo {
@@ -1163,7 +1164,7 @@ export default function App() {
   const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'accueil'|'planning'|'history'|'admin_dashboard'|'admin_invoices'|'admin_students'|'admin_past'|'admin_settings'|'dev_admin'|'admin_today'>('accueil');
+  const [activeTab, setActiveTab] = useState<'accueil' | 'planning' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
@@ -1346,14 +1347,17 @@ export default function App() {
                 )}
                 
                 {!isAdmin && (
-                  <div className="flex gap-2 sm:gap-3 items-center w-full sm:w-auto">
-                    {activeCreds > 0 ? (
-                      <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
-                    ) : (
-                      <button onClick={() => setBoutiqueOpen(true)} className="flex-1 sm:flex-none px-3 py-2 sm:px-4 sm:py-2.5 text-white shadow-md text-xs sm:text-sm font-bold flex justify-center gap-1.5 sm:gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={16} className="sm:w-[18px] sm:h-[18px]" /> Boutique</button>
-                    )}
-                  </div>
-                )}
+  <div className="flex gap-2 sm:gap-3 items-center w-full sm:w-auto">
+    {activeCreds > 0 ? (
+      <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
+    ) : (
+      <button onClick={() => setBoutiqueOpen(true)} className="flex-1 sm:flex-none px-3 py-2 sm:px-4 sm:py-2.5 text-white shadow-md text-xs sm:text-sm font-bold flex justify-center gap-1.5 sm:gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={16} className="sm:w-[18px] sm:h-[18px]" /> Boutique</button>
+    )}
+    <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-2 sm:p-2.5 text-white shadow-md hover:opacity-90 transition-opacity theme-btn flex items-center justify-center bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600">
+       <Instagram size={18} className="sm:w-5 sm:h-5" />
+    </a>
+  </div>
+)}
                 
                 {(isAdmin && hasClassToday) && (
                   <button onClick={() => setActiveTab('admin_today')} className="flex-1 sm:flex-none px-4 py-2 sm:py-2.5 shadow-xl text-xs sm:text-sm font-black flex justify-center gap-2 items-center animate-flash-vif theme-btn border-2"><Clock size={18} className="sm:w-5 sm:h-5" /> COURS DU JOUR !</button>
