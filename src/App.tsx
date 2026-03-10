@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost, FlaskConical, Target
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -13,9 +13,14 @@ import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signI
 import type { User as FirebaseUser } from 'firebase/auth';
 import jsPDF from 'jspdf'; 
 
+// --- GESTION DU MODE DÉMO ---
+export const isDemoMode = localStorage.getItem('verticali_demo') === 'true';
+export const DB_PREFIX = isDemoMode ? 'demo_' : '';
+
 // --- CONFIGURATION ---
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
 const GOOGLE_EMAIL_URL = "https://script.google.com/macros/s/AKfycbytPtkOpS6vrQvs6DWYYd2g5XWL5mRZD8dbvxCrUfZhMrK-t4JJHMkv65Av8m8P8hCF/exec";
+const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbzkbA7tdrY7fm__XsCe3VPrYzTvemzKPZCa5XI1m-Ys8IYfq03f_psXU3AZ2xZVaTcI-Q/exec";
 
 // --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
@@ -60,6 +65,10 @@ type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
 // --- FONCTIONS UTILITAIRES ---
 const syncToSheet = async (payload: any) => {
+  if (isDemoMode) {
+    console.log("🧪 DÉMO : Envoi vers Google Sheets bloqué.");
+    return;
+  }
   if (GOOGLE_SCRIPT_URL.includes("TA_NOUVELLE_URL") || GOOGLE_SCRIPT_URL.includes("TA_URL_GOOGLE")) return; 
   try {
     const actionDate = new Date().toLocaleString('fr-FR'); const enrichedPayload = { actionDate, ...payload };
@@ -133,7 +142,7 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130
 
 const getB2CInvoiceIndex = async (targetId: string, invoiceDate: Date) => {
   const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-  const [snapB, snapP] = await Promise.all([ getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID"))), getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID"))) ]);
+  const [snapB, snapP] = await Promise.all([ getDocs(query(collection(db, DB_PREFIX + "bookings"), where("paymentStatus", "==", "PAID"))), getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("status", "==", "PAID"))) ]);
   const b = snapB.docs.map(d=>({id: d.id, ...d.data()})).filter((x:any) => x.paymentMethod !== 'CREDIT');
   const p = snapP.docs.map(d=>({id: d.id, ...d.data()}));
   const all = [...b, ...p].filter((x:any) => { const d = x.paidAt ? new Date(x.paidAt) : new Date(x.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a:any, b:any) => { const da = a.paidAt ? new Date(a.paidAt) : new Date(a.date); const db = b.paidAt ? new Date(b.paidAt) : new Date(b.date); return da.getTime() - db.getTime(); });
@@ -166,7 +175,7 @@ const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
   const invoiceDate = new Date(invoice.date); const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
   const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE'; const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
-  const snap = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", invoice.status)));
+  const snap = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", invoice.status)));
   const monthInvoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).filter(i => { const d = new Date(i.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = monthInvoices.length + 1;
   const invNumber = `${prefix}-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
@@ -198,19 +207,19 @@ const AdminDashboardTab = ({ reminderDays, today }: { reminderDays: number, toda
     const fetchDashboardData = async () => {
       const currentYear = today.getFullYear(); const firstDayOfMonth = new Date(currentYear, today.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
       let caMB2C = 0; let caMB2B = 0; let caYB2C = 0; let caYB2B = 0; let lateItems: any[] = [];
-      const snapB2C = await getDocs(query(collection(db, "bookings")));
+      const snapB2C = await getDocs(query(collection(db, DB_PREFIX + "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
         if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
         if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
       });
-      const snapBoutique = await getDocs(query(collection(db, "credit_purchases")));
+      const snapBoutique = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases")));
       snapBoutique.docs.forEach(d => {
         const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
         if (p.status === 'PAID') { if (accDate >= firstDayOfMonth) caMB2C += p.price; if (accDate >= firstDayOfYear) caYB2C += p.price; }
         if (p.status === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate }); }
       });
-      const snapB2B = await getDocs(query(collection(db, "b2b_invoices")));
+      const snapB2B = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
         if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
@@ -224,9 +233,9 @@ const AdminDashboardTab = ({ reminderDays, today }: { reminderDays: number, toda
     setIsExporting(true);
     try {
       const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999); let exportRows: any[] = [];
-      const snapB2C = await getDocs(query(collection(db, "bookings"), where("paymentStatus", "==", "PAID"))); snapB2C.docs.forEach(d => { const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) { let priceNum = Number((b.price || '0').replace('€', '').trim()); if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum }); } });
-      const snapBoutique = await getDocs(query(collection(db, "credit_purchases"), where("status", "==", "PAID"))); snapBoutique.docs.forEach(d => { const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price }); });
-      const snapB2B = await getDocs(query(collection(db, "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc || 'Prestation', method: b.paymentMethod, amount: b.total }); });
+      const snapB2C = await getDocs(query(collection(db, DB_PREFIX + "bookings"), where("paymentStatus", "==", "PAID"))); snapB2C.docs.forEach(d => { const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) { let priceNum = Number((b.price || '0').replace('€', '').trim()); if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum }); } });
+      const snapBoutique = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("status", "==", "PAID"))); snapBoutique.docs.forEach(d => { const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price }); });
+      const snapB2B = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc || 'Prestation', method: b.paymentMethod, amount: b.total }); });
       exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
       let csvContent = "Date de Paiement;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n"; let totalAmount = 0;
       exportRows.forEach(r => { const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); const safeClient = r.client.replace(/"/g, '""'); csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`; totalAmount += r.amount; });
@@ -313,7 +322,7 @@ const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClas
 
 const AdminBoutiqueTab = () => {
   const [purchases, setPurchases] = useState<CreditPurchase[]>([]);
-  useEffect(() => { const unsub = onSnapshot(query(collection(db, "credit_purchases"), orderBy("date", "desc")), (snap) => setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)))); return () => unsub(); }, []);
+  useEffect(() => { const unsub = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), orderBy("date", "desc")), (snap) => setPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase)))); return () => unsub(); }, []);
   const validatePurchase = async (p: CreditPurchase) => { if(!window.confirm(`Valider le paiement de ${p.price}€ et ajouter ${p.qty} crédits à ${p.userName} ?`)) return; try { const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId))); if (userSnap.empty) return; const userData = userSnap.docs[0].data() as UserProfile; const nowStr = new Date().toISOString(); const expires = new Date(); expires.setDate(expires.getDate() + p.validityDays); await updateDoc(doc(db, "users", p.userId), { creditPacks: [...(userData.creditPacks || []), { id: p.id, qty: p.qty, remaining: p.qty, expiresAt: expires.toISOString() }] }); await updateDoc(doc(db, "credit_purchases", p.id), { status: 'PAID', paidAt: nowStr }); syncToSheet({ type: 'CREDIT_PURCHASE', id: p.id, packName: p.packName, date: new Date().toLocaleDateString('fr-FR'), price: p.price, studentName: p.userName, studentId: p.userId }); alert("Crédits ajoutés avec succès !"); } catch (e) { alert("Erreur."); } };
   const handleCancelPurchase = async (id: string) => { if (!window.confirm("Supprimer cette commande en attente ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); } catch(e) { alert("Erreur lors de l'annulation."); } };
 
@@ -337,8 +346,8 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
     const fetchAll = async () => {
       const uSnap = await getDocs(collection(db, "users")); const usersMap: any = {}; uSnap.docs.forEach(d => { usersMap[d.id] = { id: d.id, ...d.data() }; }); setUsersInfo(usersMap);
       const pSnap = await getDocs(collection(db, "pro_clients")); setProClients(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient)));
-      onSnapshot(query(collection(db, "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
-      onSnapshot(query(collection(db, "b2b_invoices"), orderBy("date", "desc")), snap => setB2bInvoices(snap.docs.map(d => ({id: d.id, ...d.data()} as B2BInvoice))));
+      onSnapshot(query(collection(db, DB_PREFIX + "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
+      onSnapshot(query(collection(db, DB_PREFIX + "b2b_invoices"), orderBy("date", "desc")), snap => setB2bInvoices(snap.docs.map(d => ({id: d.id, ...d.data()} as B2BInvoice))));
     }; fetchAll();
   }, []);
 
@@ -350,7 +359,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
 
   const handleAddProClient = async (e: React.FormEvent) => { e.preventDefault(); if (!newProClient.name || !newProClient.address) return; if (editingProId) { await updateDoc(doc(db, "pro_clients", editingProId), newProClient); setEditingProId(null); } else { await addDoc(collection(db, "pro_clients"), newProClient); } setNewProClient({ name: '', address: '', siret: '' }); const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient))); };
   const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ce client ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
-  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || b2bInvoiceData.items.length === 0 || b2bInvoiceData.items.some(i => !i.desc || i.qty <= 0 || i.price < 0)) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.items.reduce((sum, item) => sum + (item.qty * item.price), 0); const payload = { clientId: client.id, clientName: client.name, items: b2bInvoiceData.items, total, updatedAt: nowStr, desc: b2bInvoiceData.items[0].desc }; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), payload); setEditingB2bId(null); } else { await addDoc(collection(db, "b2b_invoices"), { ...payload, date: nowStr, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); };
+  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || b2bInvoiceData.items.length === 0 || b2bInvoiceData.items.some(i => !i.desc || i.qty <= 0 || i.price < 0)) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.items.reduce((sum, item) => sum + (item.qty * item.price), 0); const payload = { clientId: client.id, clientName: client.name, items: b2bInvoiceData.items, total, updatedAt: nowStr, desc: b2bInvoiceData.items[0].desc }; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), payload); setEditingB2bId(null); } else { await addDoc(collection(db, DB_PREFIX + "b2b_invoices"), { ...payload, date: nowStr, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); };
   const handleDeleteB2b = async (id: string) => { if (confirm("Supprimer cette prestation ?")) await deleteDoc(doc(db, "b2b_invoices", id)); };
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => { const ref = doc(db, "b2b_invoices", invoice.id); let updates: any = {}; const nowStr = new Date().toISOString(); if (action === 'TO_FACTURE') { if(!confirm("Transformer ce Devis en Facture ?")) return; updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; } else if (action === 'TOGGLE_PAYMENT') { const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID'; updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }; } else if (action === 'CHANGE_METHOD' && newVal) { updates = { paymentMethod: newVal, updatedAt: nowStr }; } await updateDoc(ref, updates); const updatedInvoice = { ...invoice, ...updates }; setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i)); if (updatedInvoice.status === 'FACTURE') { syncToSheet({ type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName, date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc || (updatedInvoice.items && updatedInvoice.items[0]?.desc), qty: updatedInvoice.qty || 1, price: updatedInvoice.price || updatedInvoice.total, total: updatedInvoice.total, paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod }); } };
 
@@ -394,7 +403,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
                   const isUnpaidPast = b.paymentStatus === 'PENDING' && b.isPast;
                   return (
                     <div key={b.id} className={`flex justify-between items-center p-3 m-2 border rounded-xl theme-card ${isUnpaidPast ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100 shadow-sm'}`}>
-                      <div><p className="font-bold text-gray-800 text-sm flex items-center gap-2">{b.userName.replace(' (Manuel)', '')}{isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black theme-btn">Retard</span>}</p><p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>{b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture non téléchargée`}</p></div>
+                      <div><p className="font-bold text-gray-800 text-sm flex items-center gap-2">{b.userName.replace(' (Manuel)', '')}{isUnpaidPast && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-black theme-btn">Retard</span>}</p><p className={`text-xs font-medium mt-0.5 ${isUnpaidPast ? 'text-red-600' : 'text-gray-500'}`}>{b.paymentStatus === 'PENDING' ? `En attente de paiement (${b.paymentMethod})` : `Payé (${b.paymentMethod}) - Facture téléchargée`}</p></div>
                       <div className="flex gap-2">
                         {b.paymentStatus === 'PENDING' && (<button onClick={async () => { await updateDoc(doc(db, "bookings", b.id), { paymentStatus: 'PAID', paidAt: new Date().toISOString() }); syncToSheet({ type: 'BOOKING_UPDATE', classId: b.classId, classTitle: b.classTitle, date: b.dateStr, time: b.timeStr, location: b.location || '', studentId: b.userId, studentName: `${b.userName} (${b.paymentMethod})`, paymentStatus: 'PAID', price: b.price }); }} className="p-2 rounded-lg font-bold text-xs bg-green-50 text-green-600 hover:bg-green-100 flex items-center gap-1 border border-green-200 theme-btn"><CheckCircle size={14}/> Valider Paiement</button>)}
                         <button onClick={async () => { await generateInvoicePDF(b, usersInfo[b.userId] || null, {title: c.classTitle, startAt: new Date(c.date), price: b.price}); await updateDoc(doc(db, "bookings", b.id), { invoiceDownloaded: true }); }} className={`p-2 rounded-lg font-bold text-xs flex items-center gap-1 border theme-btn ${b.paymentStatus === 'PAID' ? 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100' : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'}`}><Download size={14}/> {b.paymentStatus === 'PAID' ? 'Télécharger & Archiver' : 'Brouillon PDF'}</button>
@@ -411,17 +420,17 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ onImpersonate }: { onImpersonate: (id: string) => void }) => {
-  const [users, setUsers] = useState<UserProfile[]>([]); const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
+  const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false); const [editProfileData, setEditProfileData] = useState<Partial<UserProfile>>({});
 
-  useEffect(() => { const unsub = onSnapshot(query(collection(db, "users")), (snap) => setUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsub(); }, []);
+  useEffect(() => { const unsub = onSnapshot(query(collection(db, "users")), (snap) => setdevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsub(); }, []);
   useEffect(() => {
     if (selectedUserId) {
-      const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", selectedUserId)), (snap) => { setUserBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))); });
-      const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", selectedUserId)), (snap) => { setUserPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))); });
+      const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", selectedUserId)), (snap) => { setUserBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))); });
+      const unsubPurchases = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", selectedUserId)), (snap) => { setUserPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))); });
       const selectedUser = users.find(u => u.id === selectedUserId);
       if (selectedUser) { setMemoText(selectedUser.adminMemo || ''); setEditProfileData(selectedUser); setIsEditingProfile(false); }
       return () => { unsubBookings(); unsubPurchases(); };
@@ -446,7 +455,12 @@ const AdminStudentsTab = ({ onImpersonate }: { onImpersonate: (id: string) => vo
             <div key={u.id} className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-colors theme-card ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
               <div className="flex justify-between items-center mb-1">
                  <span className="font-bold text-sm text-gray-800 flex items-center gap-2">{u.displayName} {!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</span>
-                 <button onClick={(e) => { e.stopPropagation(); onImpersonate(u.id); }} className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold hover:bg-indigo-200" title="Voir en tant que cet élève">👻</button>
+                 <button 
+  onClick={() => setImpersonatedUserId(u.id)}
+  className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 theme-btn"
+>
+  👻 Voir Profil
+</button>
               </div>
               <span className="text-xs text-gray-500 mb-2 truncate">{u.email}</span>
               <div className="flex gap-2 items-center"><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, false)}} className="w-6 h-6 bg-gray-200 text-xs font-bold hover:bg-gray-300 theme-btn">-</button><span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 shadow-sm theme-btn">{getActiveCredits(u)} cr</span><button onClick={(e) => { e.stopPropagation(); handleManualCredit(u, true)}} className="w-6 h-6 bg-amber-200 text-amber-800 text-xs font-bold hover:bg-amber-300 theme-btn">+</button></div>
@@ -568,10 +582,10 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
         setAttendees([]);
       }
       
-      const bSnap = await getDocs(query(collection(db, "bookings"), where("classId", "==", classInfo.id)));
+      const bSnap = await getDocs(query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classInfo.id)));
       setClassBookings(bSnap.docs.map(d => ({id: d.id, ...d.data()})));
     }; fetchA();
-  }, [classInfo.attendeeIds, classInfo.id]);
+  }, [classInfo.id]);
 
   const handleManualAdd = async () => {
     if (!manualUserId) return;
@@ -627,7 +641,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
       const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
       const nowStr = new Date().toISOString();
 
-      await addDoc(collection(db, "bookings"), {
+      await addDoc(collection(db, DB_PREFIX + "bookings"), {
         classId: classInfo.id, 
         userId: targetUserId, 
         userName: targetUserName + ' (Manuel)', 
@@ -738,24 +752,37 @@ const StudentObjectivesTab = ({ userProfile, objectivesData }: any) => {
   );
 };
 
-const AdminObjectivesTab = ({ users, objectivesData }: any) => {
+const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const filteredUsers = users.filter((u:any) => u.role !== 'admin' && u.role !== 'dev-admin' && u.displayName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const toggleObjective = async (user: any, objId: string) => {
-     const validated = user.validatedObjectives || [];
-     const newValidated = validated.includes(objId) ? validated.filter((id:string) => id !== objId) : [...validated, objId];
-     await updateDoc(doc(db, "users", user.id), { validatedObjectives: newValidated });
-  };
-  const changeLevel = async (user: any, delta: number) => {
-     const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
-     await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
-  };
+    if (isDemoMode) return alert("🧪 MODE DÉMO : La modification des objectifs des vrais élèves est bloquée pour protéger la base de données.");
+    const validated = user.validatedObjectives || [];
+    const newValidated = validated.includes(objId) ? validated.filter((id:string) => id !== objId) : [...validated, objId];
+    await updateDoc(doc(db, "users", user.id), { validatedObjectives: newValidated });
+ };
+ 
+ const changeLevel = async (user: any, delta: number) => {
+    if (isDemoMode) return alert("🧪 MODE DÉMO : Le changement de niveau des vrais élèves est bloqué !");
+    const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
+    await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
+ };
 
   return (
      <div className="space-y-6 text-left">
-       <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2 mb-4"><TrendingUp className="text-amber-500"/> Validation des Objectifs</h2>
+       <div className="flex justify-between items-center mb-6">
+  <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2 text-gray-800">
+    <Target className="text-indigo-600" /> Suivi des Objectifs
+  </h2>
+  <button 
+    onClick={() => setActiveTab('admin_settings')} 
+    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-bold transition-colors flex items-center gap-2 theme-btn"
+  >
+    ⚙️ Modifier les objectifs
+  </button>
+</div>
        <div className="relative"><Search size={18} className="absolute left-3 top-3.5 text-gray-400"/><input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/></div>
        <div className="space-y-3">
          {filteredUsers.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : filteredUsers.map((user:any) => {
@@ -840,7 +867,7 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!data.date || !data.title) return;
     const locObj = locations.find(l => l.name === data.loc); const payload = { title: data.title, description: data.desc, instructor: "Ali", location: data.loc, locationAddress: locObj ? locObj.address : '', price: data.price, startAt: Timestamp.fromDate(new Date(data.date)), endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), maxCapacity: Number(data.cap), externalLink: data.externalLink, color: data.color };
-    if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); else await addDoc(collection(db, "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
+    if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); else await addDoc(collection(db, DB_PREFIX + "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
     setIsOpen(false); onCancelEdit(); onAdd();
   };
   if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-8 border-2 border-dashed border-amber-300 text-amber-700 py-4 flex justify-center items-center gap-2 font-bold hover:bg-amber-50 theme-card"><Plus/> Créer un nouveau cours</button>;
@@ -864,7 +891,7 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData }: any) => {
+const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' });
   const [remDays, setRemDays] = useState(globalSettings.reminderDays); const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || ''); const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
@@ -879,7 +906,7 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
   const addPack = async (e: React.FormEvent) => { e.preventDefault(); if(!newPack.name) return; let updatedList; if (editingPackId) { updatedList = creditPacks.map((p:any) => p.id === editingPackId ? { ...p, ...newPack } : p); setEditingPackId(null); } else { updatedList = [...creditPacks, { id: Date.now().toString(), ...newPack }]; } await setDoc(doc(db, "settings", "general"), { creditPacks: updatedList }, { merge: true }); setNewPack({ name: '', price: 0, qty: 1, validityDays: 90 }); };
   const removePack = async (id: string) => { if(!confirm("Supprimer ce pack ?")) return; await setDoc(doc(db, "settings", "general"), { creditPacks: creditPacks.filter((p:any) => p.id !== id) }, { merge: true }); };
   const saveSettings = async () => { await setDoc(doc(db, "settings", "general"), { reminderDays: remDays, welcomeText, welcomeImageUrl: welcomeImage, welcomeTextSize, welcomeImageSize }, { merge: true }); alert("Enregistré !"); };
-  const exportFullBackup = async () => { try { let csv = "COLLECTION;ID;DONNEES\n"; const uSnap = await getDocs(collection(db, "users")); uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const cSnap = await getDocs(collection(db, "classes")); cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const bSnap = await getDocs(collection(db, "bookings")); bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch(e) { alert("Erreur."); } };
+  const exportFullBackup = async () => { try { let csv = "COLLECTION;ID;DONNEES\n"; const uSnap = await getDocs(collection(db, "users")); uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const cSnap = await getDocs(collection(db, DB_PREFIX + "classes")); cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const bSnap = await getDocs(collection(db, DB_PREFIX + "bookings")); bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch(e) { alert("Erreur."); } };
 
   const handleAddObj = async (level: string) => {
     if(!newObjInputs[level]) return;
@@ -941,6 +968,41 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
                  {(!objectivesData[lvl.key] || objectivesData[lvl.key].length === 0) ? <p className="text-xs opacity-50 italic">Aucun objectif</p> : objectivesData[lvl.key].map((o:any) => (
                    <div key={o.id} className="flex justify-between items-center bg-white p-2 rounded border border-gray-100 shadow-sm text-sm">
                      <span className="font-bold truncate pr-2">{o.text}</span>
+                     <button 
+  onClick={async () => {
+    const newText = window.prompt("Modifier l'objectif :", o.text);
+    
+    if (newText && newText.trim() !== "" && newText !== o.text) {
+      
+      // 1. On prépare la nouvelle liste avec le texte modifié
+      const updatedLevel = objectivesData[lvl.key].map((item: any) => 
+        item.id === o.id ? { ...item, text: newText.trim() } : item
+      );
+
+      // 2. On met à jour l'écran tout de suite pour la fluidité
+      setObjectivesData((prev: any) => ({
+        ...prev,
+        [lvl.key]: updatedLevel
+      }));
+
+      // 3. 🚀 ON ENVOIE À FIREBASE (La vraie magie)
+      try {
+        // Remplace DB_PREFIX + "settings" par juste "settings" si tu n'utilises pas de préfixe
+        const docRef = doc(db, "settings", "objectives"); 
+        await updateDoc(docRef, {
+          [lvl.key]: updatedLevel
+        });
+      } catch (error) {
+        console.error("Erreur Firebase :", error);
+        alert("Oups, la modification n'a pas pu être envoyée à Firebase !");
+      }
+    }
+  }} 
+  className="text-amber-500 hover:text-amber-700 mr-2"
+  title="Modifier"
+>
+  <Edit2 size={14} />
+</button>
                      <button onClick={() => removeObj(lvl.key, o.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
                    </div>
                  ))}
@@ -1103,7 +1165,7 @@ const BoutiqueModal = ({ isOpen, onClose, user, packs }: any) => {
   if (!isOpen) return null; const activeCreds = getActiveCredits(user);
   const handleBuy = async (pack: CreditPackTemplate) => {
     if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ?`)) return;
-    try { await addDoc(collection(db, "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement."); onClose(); } catch (e) {}
+    try { await addDoc(collection(db, DB_PREFIX + "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement."); onClose(); } catch (e) {}
   };
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative theme-card"><h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>{packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map((p:any) => (<div key={p.id} className="border border-gray-200 p-4 flex justify-between items-center bg-gray-50 theme-card"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 theme-btn">Commander</button></div></div>))}</div>)}<button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 theme-btn">Fermer</button></div></div>
@@ -1182,9 +1244,16 @@ export default function App() {
   // CALCUL DES RÔLES EFFECTIFS (Avec le Simulateur)
   const isRealDevAdmin = userProfile?.role === 'dev-admin';
   const effectiveUser = impersonatedUserId ? devUsers.find(u => u.id === impersonatedUserId) || userProfile : userProfile;
-  const isAdmin = simulatedRole === 'admin' || (simulatedRole === '' && (effectiveUser?.role === 'admin' || effectiveUser?.role === 'dev-admin'));
+  const isAdmin = simulatedRole === 'admin' || (simulatedRole === '' && !impersonatedUserId && (userProfile?.role === 'admin' || userProfile?.role === 'dev-admin'));
   const todayDate = simulatedDate ? new Date(simulatedDate) : new Date();
   const [hasInvoiceAlert, setHasInvoiceAlert] = useState(false);
+
+  // 🪄 AUTO-TÉLÉPORTATION FANTÔME
+  useEffect(() => {
+    if (impersonatedUserId !== '') {
+      setActiveTab('accueil'); // Dès qu'un fantôme est activé, on force l'onglet accueil !
+    }
+  }, [impersonatedUserId]);
 
   useEffect(() => {
     if (isAdmin) { const now = todayDate.getTime(); const alert = allBookings.some(b => { if (b.paymentMethod === 'CREDIT') return false; const isPast = new Date(b.date).getTime() < now; if (b.paymentStatus === 'PENDING' && isPast) return true; if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; return false; }) || allPurchases.some(p => p.status === 'PENDING'); setHasInvoiceAlert(alert); }
@@ -1201,8 +1270,8 @@ export default function App() {
              if (!emailSnap.empty) {
                 const oldDoc = emailSnap.docs[0]; const oldData = oldDoc.data();
                 await setDoc(userRef, { ...oldData, id: user.uid, displayName: user.displayName }); await deleteDoc(doc(db, "users", oldDoc.id));
-                const bQ = await getDocs(query(collection(db, "bookings"), where("userId", "==", oldDoc.id))); bQ.forEach(b => updateDoc(doc(db, "bookings", b.id), { userId: user.uid }));
-                const pQ = await getDocs(query(collection(db, "credit_purchases"), where("userId", "==", oldDoc.id))); pQ.forEach(p => updateDoc(doc(db, "credit_purchases", p.id), { userId: user.uid }));
+                const bQ = await getDocs(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", oldDoc.id))); bQ.forEach(b => updateDoc(doc(db, "bookings", b.id), { userId: user.uid }));
+                const pQ = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", oldDoc.id))); pQ.forEach(p => updateDoc(doc(db, "credit_purchases", p.id), { userId: user.uid }));
              } else {
                 const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false }; setDoc(userRef, newUser); syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
              }
@@ -1222,13 +1291,13 @@ export default function App() {
           if (!isInitialLoad && "Notification" in window && Notification.permission === "granted") { nsnap.docChanges().forEach((change) => { if (change.type === "added") { const data = change.doc.data(); if (Date.now() - new Date(data.date).getTime() < 120000) new Notification("Vertic'Ali", { body: data.text, icon: "/logo.png" }); } }); }
           isInitialLoad = false;
        });
-       const unsubP = onSnapshot(query(collection(db, "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
-       const unsubB = onSnapshot(query(collection(db, "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
+       const unsubP = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
+       const unsubB = onSnapshot(query(collection(db, DB_PREFIX + "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
        return () => { notifUnsub(); unsubP(); unsubB(); };
     }
   }, [isAdmin]);
 
-  const fetchAllData = async () => { const snap = await getDocs(query(collection(db, "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); setClasses(all.filter(c => c.endAt && c.endAt > todayDate)); setPastClasses(all.filter(c => c.endAt && c.endAt <= todayDate).reverse()); };
+  const fetchAllData = async () => { const snap = await getDocs(query(collection(db, DB_PREFIX + "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); setClasses(all.filter(c => c.endAt && c.endAt > todayDate)); setPastClasses(all.filter(c => c.endAt && c.endAt <= todayDate).reverse()); };
   
   useEffect(() => { 
     fetchAllData(); 
@@ -1237,8 +1306,8 @@ export default function App() {
   }, [simulatedDate]);
     onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { if (docSnap.exists()) setObjectivesData(docSnap.data()); else setDoc(doc(db, "settings", "objectives"), { bronze: [], silver: [], gold: [] }); });
 
-  useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
-  useEffect(() => { if (isRealDevAdmin) { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [isRealDevAdmin]);
+  useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
+  useEffect(() => { if (userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [userProfile?.role]);
 
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
   const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
@@ -1252,7 +1321,7 @@ export default function App() {
         if (method === 'CREDIT') { const now = todayDate.getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
         t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...(classData.attendeeIds||[]), effectiveUser.id] });
         const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING'; const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR'); const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const nowStr = todayDate.toISOString();
-        t.set(doc(collection(db, "bookings")), { classId, userId: effectiveUser.id, userName: effectiveUser.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
+        t.set(doc(collection(db, DB_PREFIX + "bookings")), { classId, userId: effectiveUser.id, userName: effectiveUser.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
         return { classTarget: { id: classId, ...classData, startAt: classData.startAt.toDate(), endAt: classData.endAt.toDate() } as DanceClass, dateStr, timeStr, method, paymentStatus };
       }).then((d) => { syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: effectiveUser.id, studentName: `${effectiveUser.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); sendNotification(`Nouvelle réservation : ${effectiveUser.displayName} pour ${d.classTarget.title}`, 'BOOKING'); setBookingSuccessData(d.classTarget); fetchAllData(); });
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
@@ -1260,7 +1329,7 @@ export default function App() {
   const handleCancel = async (classId: string) => {
     if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
     try {
-      const q = query(collection(db, "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
+      const q = query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus; }
       await runTransaction(db, async (t) => {
         const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
@@ -1339,6 +1408,14 @@ export default function App() {
             </div>
             {!devVis.hideIcons && (
               <div className="flex gap-2 sm:gap-3 items-center self-start sm:self-auto flex-wrap w-full sm:w-auto mt-2 sm:mt-0">
+                              {isRealDevAdmin && (
+                <button 
+                  onClick={() => { localStorage.setItem('verticali_demo', (!isDemoMode).toString()); window.location.reload(); }} 
+                  className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 border-2 transition-all shadow-sm ${isDemoMode ? 'bg-purple-100 text-purple-700 border-purple-500 animate-pulse' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                >
+                  <FlaskConical size={16} /> {isDemoMode ? 'DÉMO ACTIVE' : 'Démo'}
+                </button>
+              )}
                 {isAdmin && (
                   <div className="relative">
                     <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 sm:p-3 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 relative theme-btn"><Bell size={18} className="text-gray-600 sm:w-5 sm:h-5"/>{unreadNotifs > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white"></span>}</button>
@@ -1406,10 +1483,15 @@ export default function App() {
                 <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_past' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Archive size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Archives</span></button>
                 <button onClick={() => setActiveTab('admin_today')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_today' ? 'bg-amber-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Clock size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Cours du jour</span></button>
                 <button onClick={() => setActiveTab('admin_settings')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Settings size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Réglages</span></button>
+                {isRealDevAdmin && (
+  <button 
+    onClick={() => setActiveTab('dev_admin')} 
+    className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap ml-auto transition-colors theme-btn ${activeTab === 'dev_admin' ? 'bg-blue-600 text-white shadow-md' : 'bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100'}`}
+  >
+    <Code size={16} /><span className="text-xs sm:text-sm hidden sm:inline">Module Dev</span>
+  </button>
+)}
               </>
-            )}
-            {isRealDevAdmin && (
-               <button onClick={() => setActiveTab('dev_admin')} className="flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap ml-auto transition-colors" style={activeTab === 'dev_admin' ? {backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'} : {backgroundColor: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '12px'}}><Code size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Dev</span></button>
             )}
           </nav>
         )}
@@ -1449,11 +1531,17 @@ export default function App() {
         {activeTab === 'admin_today' && isAdmin && <AdminTodayTab classes={[...classes, ...pastClasses]} users={devUsers} today={todayDate} bookings={allBookings} />}
         {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
         {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
-        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab onImpersonate={(id) => {setImpersonatedUserId(id); setActiveTab('planning');}} />}
+        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab users={devUsers} setImpersonatedUserId={setImpersonatedUserId} setActiveTab={setActiveTab} />}
         {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
-        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} />}
+        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData}/>}
         {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
-        {activeTab === 'admin_objectives' && isAdmin && <AdminObjectivesTab users={devUsers} objectivesData={objectivesData} />}
+        {activeTab === 'admin_objectives' && isAdmin && (
+  <AdminObjectivesTab 
+    users={devUsers} 
+    objectivesData={objectivesData} 
+    setActiveTab={setActiveTab} 
+  />
+)}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
       </div>
 
