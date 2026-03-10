@@ -420,7 +420,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -1225,6 +1225,7 @@ export default function App() {
   const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'accueil' | 'planning' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
@@ -1300,7 +1301,20 @@ export default function App() {
   
   useEffect(() => { 
     fetchAllData(); 
-    onSnapshot(doc(db, "settings", "general"), (docSnap) => { if (docSnap.exists()) { const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); }); 
+    onSnapshot(doc(db, "settings", "general"), (docSnap) => { 
+      if (docSnap.exists()) { 
+        const data = docSnap.data(); 
+        setLocations(data.locations || []); 
+        setTemplates(data.templates || []); 
+        setCreditPacks(data.creditPacks || []); 
+        setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); 
+      } else {
+        setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); 
+      }
+      
+      // 👇 LA NOUVELLE LIGNE EST LÀ 👇
+      setSettingsLoading(false); 
+    });
     onSnapshot(doc(db, "settings", "theme"), (docSnap) => { if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); });
   }, [simulatedDate]);
     onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { if (docSnap.exists()) setObjectivesData(docSnap.data()); else setDoc(doc(db, "settings", "objectives"), { bronze: [], silver: [], gold: [] }); });
@@ -1345,6 +1359,12 @@ export default function App() {
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
   if (!authUser) return <LoginScreen />;
+  if (settingsLoading) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
+      <Loader2 className="animate-spin text-amber-500 mb-4" size={48} />
+      <p className="text-gray-400 font-bold animate-pulse">Préparation du studio...</p>
+    </div>
+  );
 
   const activeCreds = effectiveUser ? getActiveCredits(effectiveUser) : 0; 
   const unreadNotifs = notifications.filter(n => !n.read).length;
