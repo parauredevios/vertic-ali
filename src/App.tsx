@@ -440,7 +440,7 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
   const handleSaveMemo = async (u: any) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
   const handleSaveAdminProfileEdit = async (u: any) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
 
-  const filteredUsers = users.filter(u => u.role !== 'admin' && u.role !== 'dev-admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
+  const filteredUsers = users.filter((u: any) => u.role !== 'admin' && u.role !== 'dev-admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
   const selectedUser = users.find(u => u.id === selectedUserId);
   const timeline = [ ...userBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...userPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
 
