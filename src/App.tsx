@@ -420,7 +420,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -430,19 +430,19 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
     if (selectedUserId) {
       const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", selectedUserId)), (snap) => { setUserBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))); });
       const unsubPurchases = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", selectedUserId)), (snap) => { setUserPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))); });
-      const selectedUser = users.find(u => u.id === selectedUserId);
+      const selectedUser = users.find((u: any) => u.id === selectedUserId);
       if (selectedUser) { setMemoText(selectedUser.adminMemo || ''); setEditProfileData(selectedUser); setIsEditingProfile(false); }
       return () => { unsubBookings(); unsubPurchases(); };
     }
   }, [selectedUserId, users]);
 
-  const handleManualCredit = async (u:any, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
+  const handleManualCredit = async (u: any, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find((p: any) => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
   const handleSaveMemo = async (u: any) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
   const handleSaveAdminProfileEdit = async (u: any) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
 
   const filteredUsers = users.filter((u: any) => u.role !== 'admin' && u.role !== 'dev-admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
-  const selectedUser = users.find(u => u.id === selectedUserId);
-  const timeline = [ ...userBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...userPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
+  const selectedUser = users.find((u: any) => u.id === selectedUserId);
+  const timeline = [ ...userBookings.map((b: any) => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...userPurchases.map((p: any) => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a: any, b: any) => b.dateObj.getTime() - a.dateObj.getTime());
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 items-start text-left">
@@ -450,7 +450,7 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Users size={18}/> Annuaire Élèves</h3>
         <div className="relative mb-4"><Search size={18} className="absolute left-3 top-3 text-gray-400"/><input type="text" placeholder="Rechercher un nom ou mail..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-amber-500 theme-btn text-sm" /></div>
         <div className="space-y-2 overflow-y-auto flex-1 pr-2">
-          {filteredUsers.length === 0 ? <p className="text-center text-sm text-gray-400 py-4">Aucun élève trouvé.</p> : filteredUsers.map(u => (
+          {filteredUsers.length === 0 ? <p className="text-center text-sm text-gray-400 py-4">Aucun élève trouvé.</p> : filteredUsers.map((u: any) => (
             <div key={u.id} className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-colors theme-card ${selectedUserId === u.id ? 'border-gray-800 bg-gray-50 shadow-sm' : 'border-gray-100 hover:border-gray-300'}`} onClick={() => {setSelectedUserId(u.id); setActiveSubTab('history');}}>
               <div className="flex justify-between items-center mb-1">
                  <span className="font-bold text-sm text-gray-800 flex items-center gap-2">{u.displayName} {!u.hasFilledForm && <span title="Profil incomplet"><AlertTriangle size={14} className="text-red-500" /></span>}</span>
