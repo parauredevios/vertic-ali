@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Palette, Type, Square, MessageSquare, Mail, EyeOff, Ghost
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -536,6 +536,277 @@ const AdminStudentsTab = ({ onImpersonate }: { onImpersonate: (id: string) => vo
   );
 };
 
+const getProgressTier = (pct: number) => {
+  if (pct < 25) return { name: 'Blanc', color: '#f3f4f6', text: '#374151', border: '#e5e7eb' };
+  if (pct < 50) return { name: 'Bronze', color: '#cd7f32', text: '#ffffff', border: '#b8732c' };
+  if (pct < 75) return { name: 'Argent', color: '#9ca3af', text: '#ffffff', border: '#6b7280' };
+  return { name: 'Or', color: '#fbbf24', text: '#9a3412', border: '#f59e0b' };
+};
+
+const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
+  const [attendees, setAttendees] = useState<any[]>([]);
+  const [classBookings, setClassBookings] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [manualUserId, setManualUserId] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  
+  // States pour la création d'un élève fantôme
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+
+  useEffect(() => {
+    const fetchA = async () => {
+      const snap = await getDocs(collection(db, "users"));
+      const all = snap.docs.map(d=>({id: d.id, ...d.data()}));
+      setAllUsers(all);
+
+      if (classInfo.attendeeIds?.length) {
+        setAttendees(all.filter((u:any) => classInfo.attendeeIds.includes(u.id)));
+      } else {
+        setAttendees([]);
+      }
+      
+      const bSnap = await getDocs(query(collection(db, "bookings"), where("classId", "==", classInfo.id)));
+      setClassBookings(bSnap.docs.map(d => ({id: d.id, ...d.data()})));
+    }; fetchA();
+  }, [classInfo.attendeeIds, classInfo.id]);
+
+  const handleManualAdd = async () => {
+    if (!manualUserId) return;
+    setIsAdding(true);
+    try {
+      let targetUserId = manualUserId;
+      let targetUserName = '';
+
+      // CAS 1 : NOUVELLE ÉLÈVE FANTÔME
+      if (manualUserId === 'NEW_STUDENT') {
+        if (!newFirstName || !newLastName || !newEmail) { 
+          alert("Veuillez remplir le prénom, nom et email."); 
+          setIsAdding(false); 
+          return; 
+        }
+        targetUserName = `${newFirstName.trim()} ${newLastName.trim()}`;
+        
+        // Vérifier si l'email existe déjà dans la base
+        const emailQ = query(collection(db, "users"), where("email", "==", newEmail.trim().toLowerCase()));
+        const emailSnap = await getDocs(emailQ);
+        if (!emailSnap.empty) { 
+          alert("Un compte existe déjà avec cet email ! Cherchez-la directement dans la liste déroulante."); 
+          setIsAdding(false); 
+          return; 
+        }
+
+        // Créer le profil fantôme dans la base de données
+        const newUserRef = await addDoc(collection(db, "users"), {
+          displayName: targetUserName,
+          email: newEmail.trim().toLowerCase(),
+          role: 'student',
+          credits: 0,
+          hasFilledForm: false
+        });
+        targetUserId = newUserRef.id;
+      } 
+      // CAS 2 : ÉLÈVE DÉJÀ DANS LA LISTE
+      else {
+        const selectedUser = allUsers.find(u => u.id === manualUserId);
+        if (!selectedUser) { setIsAdding(false); return; }
+        targetUserName = selectedUser.displayName;
+      }
+
+      // Mettre à jour le cours (+1)
+      const classRef = doc(db, "classes", classInfo.id);
+      await updateDoc(classRef, { 
+        attendeesCount: (classInfo.attendeesCount || 0) + 1, 
+        attendeeIds: [...(classInfo.attendeeIds || []), targetUserId] 
+      });
+
+      // Créer la facture (En attente de paiement sur place)
+      const dateStr = classInfo.startAt.toLocaleDateString('fr-FR');
+      const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+      const nowStr = new Date().toISOString();
+
+      await addDoc(collection(db, "bookings"), {
+        classId: classInfo.id, 
+        userId: targetUserId, 
+        userName: targetUserName + ' (Manuel)', 
+        classTitle: classInfo.title, 
+        date: classInfo.startAt.toISOString(), 
+        dateStr, timeStr,
+        location: classInfo.location, 
+        price: classInfo.price || '',
+        paymentMethod: 'CASH', 
+        paymentStatus: 'PENDING', 
+        updatedAt: nowStr
+      });
+
+      // Nettoyer les champs
+      setManualUserId(''); setNewFirstName(''); setNewLastName(''); setNewEmail('');
+      if(onRefresh) onRefresh();
+    } catch(e) {
+      alert("Erreur lors de l'ajout.");
+    }
+    setIsAdding(false);
+  };
+
+  const availableUsers = allUsers.filter(u => u.role !== 'admin' && u.role !== 'dev-admin' && !(classInfo.attendeeIds || []).includes(u.id)).sort((a,b) => a.displayName.localeCompare(b.displayName));
+
+  return (
+    <div className="bg-gray-50 border-t border-gray-100 p-2 space-y-2">
+      {(!classInfo.attendeeIds || classInfo.attendeeIds.length === 0) ? (
+        <div className="p-3 text-center text-sm text-gray-400">Aucun inscrit</div>
+      ) : (
+        attendees.map(u => {
+          const b = classBookings.find(x => x.userId === u.id);
+          return (
+            <div key={u.id} className="flex justify-between items-center bg-white p-2 border border-gray-100 rounded text-sm shadow-sm theme-card">
+              <span className="font-bold text-gray-700">{u.displayName}</span>
+              {b ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase">{b.paymentMethod === 'CASH' ? 'Sur place' : b.paymentMethod}</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span>
+                </div>
+              ) : <span className="text-[10px] text-gray-400">Non réservé</span>}
+            </div>
+          )
+        })
+      )}
+
+      {classInfo.attendeesCount < classInfo.maxCapacity && (
+        <div className="mt-2 pt-2 border-t border-gray-200 flex flex-col gap-2">
+           <div className="flex gap-2">
+             <select value={manualUserId} onChange={e => setManualUserId(e.target.value)} className="flex-1 p-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg outline-none bg-white theme-btn">
+               <option value="">-- Ajouter un(e) élève --</option>
+               <option value="NEW_STUDENT">➕ Créer une nouvelle élève</option>
+               {availableUsers.map(u => <option key={u.id} value={u.id}>{u.displayName}</option>)}
+             </select>
+             {manualUserId !== 'NEW_STUDENT' && (
+               <button onClick={handleManualAdd} disabled={!manualUserId || isAdding} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg disabled:opacity-50 theme-btn transition-colors">
+                 {isAdding ? '...' : '+ Ajouter'}
+               </button>
+             )}
+           </div>
+           
+           {manualUserId === 'NEW_STUDENT' && (
+             <div className="bg-white p-3 rounded-xl border border-amber-200 flex flex-col gap-2 shadow-sm animate-in fade-in zoom-in duration-200">
+                <p className="text-xs font-bold text-amber-800 mb-1">Création d'un profil :</p>
+                <div className="flex gap-2">
+                  <input type="text" placeholder="Prénom" value={newFirstName} onChange={e=>setNewFirstName(e.target.value)} className="w-1/2 p-2 border rounded text-xs outline-none focus:border-amber-500 theme-btn" />
+                  <input type="text" placeholder="Nom" value={newLastName} onChange={e=>setNewLastName(e.target.value)} className="w-1/2 p-2 border rounded text-xs outline-none focus:border-amber-500 theme-btn" />
+                </div>
+                <input type="email" placeholder="Adresse Email (Obligatoire pour l'historique)" value={newEmail} onChange={e=>setNewEmail(e.target.value)} className="w-full p-2 border rounded text-xs outline-none focus:border-amber-500 theme-btn" />
+                <button onClick={handleManualAdd} disabled={isAdding || !newFirstName || !newLastName || !newEmail} className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg disabled:opacity-50 theme-btn transition-colors mt-1">
+                  {isAdding ? 'Création en cours...' : 'Valider & Ajouter au cours'}
+                </button>
+             </div>
+           )}
+        </div>
+      )}
+    </div>
+  )
+};
+
+const StudentObjectivesTab = ({ userProfile, objectivesData }: any) => {
+  const level = userProfile?.currentLevel || 1;
+  const validated = userProfile?.validatedObjectives || [];
+  const currentLevelData = level === 1 ? objectivesData.bronze : level === 2 ? objectivesData.silver : objectivesData.gold;
+  const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
+  const tier = getProgressTier(progress);
+
+  return (
+     <div className="bg-white p-6 rounded-2xl shadow-sm border theme-card max-w-2xl mx-auto text-left">
+       <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2 mb-6"><TrendingUp className="text-amber-500"/> Mes Objectifs</h2>
+       <div className="p-6 rounded-2xl shadow-md mb-6 relative overflow-hidden border-2" style={{backgroundColor: tier.color, borderColor: tier.border, color: tier.text}}>
+          <div className="absolute -right-6 -top-6 opacity-20 text-black"><TrendingUp size={120}/></div>
+          <h3 className="font-black text-2xl mb-2 relative z-10">Niveau {level}</h3>
+          <div className="w-full bg-black/10 rounded-full h-4 mb-2 relative z-10 overflow-hidden"><div className="bg-white rounded-full h-4 transition-all duration-1000" style={{width: `${progress}%`}}></div></div>
+          <p className="text-sm font-bold relative z-10">{progress}% de réussite</p>
+       </div>
+       <div className="space-y-3">
+         {!currentLevelData || currentLevelData.length === 0 ? <p className="text-gray-400 text-sm text-center py-4">Aucun objectif défini pour ce niveau.</p> : currentLevelData.map((obj:any) => {
+           const isDone = validated.includes(obj.id);
+           return (
+             <div key={obj.id} className={`p-4 rounded-xl border flex items-center gap-3 theme-card transition-all ${isDone ? 'bg-green-50 border-green-200 shadow-sm' : 'bg-gray-50 border-gray-100'}`}>
+               <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${isDone ? 'bg-green-500 text-white shadow-md' : 'bg-gray-200 text-transparent'}`}><CheckCircle size={14}/></div>
+               <span className={`font-bold text-sm ${isDone ? 'text-green-800 line-through opacity-70' : 'text-gray-700'}`}>{obj.text}</span>
+             </div>
+           )
+         })}
+       </div>
+     </div>
+  );
+};
+
+const AdminObjectivesTab = ({ users, objectivesData }: any) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const filteredUsers = users.filter((u:any) => u.role !== 'admin' && u.role !== 'dev-admin' && u.displayName.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  const toggleObjective = async (user: any, objId: string) => {
+     const validated = user.validatedObjectives || [];
+     const newValidated = validated.includes(objId) ? validated.filter((id:string) => id !== objId) : [...validated, objId];
+     await updateDoc(doc(db, "users", user.id), { validatedObjectives: newValidated });
+  };
+  const changeLevel = async (user: any, delta: number) => {
+     const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
+     await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
+  };
+
+  return (
+     <div className="space-y-6 text-left">
+       <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2 mb-4"><TrendingUp className="text-amber-500"/> Validation des Objectifs</h2>
+       <div className="relative"><Search size={18} className="absolute left-3 top-3.5 text-gray-400"/><input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/></div>
+       <div className="space-y-3">
+         {filteredUsers.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : filteredUsers.map((user:any) => {
+           const lvl = user.currentLevel || 1;
+           const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
+           const validated = user.validatedObjectives || [];
+           const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
+           const tier = getProgressTier(progress);
+           const isExpanded = expandedUserId === user.id;
+
+           return (
+             <div key={user.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden theme-card transition-all ${isExpanded ? 'ring-2 ring-amber-400' : ''}`}>
+               <div className="p-4 flex flex-col sm:flex-row justify-between items-center gap-4 cursor-pointer hover:bg-gray-50" onClick={() => setExpandedUserId(isExpanded ? null : user.id)}>
+                 <div className="flex items-center gap-3 w-full sm:w-auto">
+                   <div className="w-10 h-10 rounded-full flex items-center justify-center font-black shadow-inner border-2" style={{backgroundColor: tier.color, color: tier.text, borderColor: tier.border}}>{lvl}</div>
+                   <div><p className="font-bold text-gray-800">{user.displayName}</p></div>
+                 </div>
+                 <div className="w-full sm:w-1/3 flex items-center gap-3">
+                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden"><div className="h-2.5 rounded-full transition-all duration-500" style={{width: `${progress}%`, backgroundColor: tier.color === '#f3f4f6' ? '#d1d5db' : tier.color}}></div></div>
+                    <span className="text-xs font-black text-gray-600 w-10 text-right">{progress}%</span>
+                 </div>
+               </div>
+               {isExpanded && (
+                 <div className="p-4 bg-gray-50 border-t border-gray-100 animate-in slide-in-from-top-2">
+                   <div className="flex justify-between items-center mb-4">
+                     <h4 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Programme Niveau {lvl}</h4>
+                     <div className="flex gap-2">
+                       <button onClick={(e) => {e.stopPropagation(); changeLevel(user, -1)}} disabled={lvl === 1} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-gray-100 theme-btn">Rétrograder</button>
+                       <button onClick={(e) => {e.stopPropagation(); changeLevel(user, 1)}} disabled={lvl === 3} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 shadow-sm hover:bg-amber-600 theme-btn">Promouvoir ⭐️</button>
+                     </div>
+                   </div>
+                   <div className="space-y-2">
+                     {!currentLevelData || currentLevelData.length === 0 ? <p className="text-xs text-gray-400">Aucun objectif créé pour le moment.</p> : currentLevelData.map((obj:any) => {
+                       const isChecked = validated.includes(obj.id);
+                       return (
+                         <label key={obj.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors theme-btn ${isChecked ? 'bg-green-50 border-green-200 text-green-800 shadow-sm' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                           <input type="checkbox" checked={isChecked} onChange={() => toggleObjective(user, obj.id)} className="w-5 h-5 accent-green-600"/>
+                           <span className="text-sm font-bold">{obj.text}</span>
+                         </label>
+                       )
+                     })}
+                   </div>
+                 </div>
+               )}
+             </div>
+           )
+         })}
+       </div>
+     </div>
+  );
+};
+
 const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const isFull = info.attendeesCount >= info.maxCapacity;
@@ -592,12 +863,13 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }: any) => {
+const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' });
   const [remDays, setRemDays] = useState(globalSettings.reminderDays); const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || ''); const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
   const [welcomeTextSize, setWelcomeTextSize] = useState(globalSettings.welcomeTextSize || 18); const [welcomeImageSize, setWelcomeImageSize] = useState(globalSettings.welcomeImageSize || 50);
   const [newPack, setNewPack] = useState({ name: '', price: 0, qty: 1, validityDays: 90 });
+  const [newObjInputs, setNewObjInputs] = useState<any>({ bronze: '', silver: '', gold: '' });
 
   const addLocation = async () => { if (!newLocName) return; let updatedList; if (editingLocId) { updatedList = locations.map((l:any) => l.id === editingLocId ? { ...l, name: newLocName, address: newLocAddress } : l); setEditingLocId(null); } else { updatedList = [...locations, { id: Date.now().toString(), name: newLocName, address: newLocAddress }]; } await setDoc(doc(db, "settings", "general"), { locations: updatedList }, { merge: true }); setNewLocName(''); setNewLocAddress(''); };
   const removeLocation = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { locations: locations.filter((l:any) => l.id !== id) }, { merge: true }); };
@@ -607,6 +879,18 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
   const removePack = async (id: string) => { if(!confirm("Supprimer ce pack ?")) return; await setDoc(doc(db, "settings", "general"), { creditPacks: creditPacks.filter((p:any) => p.id !== id) }, { merge: true }); };
   const saveSettings = async () => { await setDoc(doc(db, "settings", "general"), { reminderDays: remDays, welcomeText, welcomeImageUrl: welcomeImage, welcomeTextSize, welcomeImageSize }, { merge: true }); alert("Enregistré !"); };
   const exportFullBackup = async () => { try { let csv = "COLLECTION;ID;DONNEES\n"; const uSnap = await getDocs(collection(db, "users")); uSnap.forEach(d => { csv += `UTILISATEURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const cSnap = await getDocs(collection(db, "classes")); cSnap.forEach(d => { csv += `COURS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const bSnap = await getDocs(collection(db, "bookings")); bSnap.forEach(d => { csv += `RESERVATIONS;${d.id};"${JSON.stringify(d.data()).replace(/"/g, '""')}"\n`; }); const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", `Backup_Manuel_Site_${new Date().toLocaleDateString('fr-FR')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch(e) { alert("Erreur."); } };
+
+  const handleAddObj = async (level: string) => {
+    if(!newObjInputs[level]) return;
+    const updatedList = [...(objectivesData[level] || []), { id: Date.now().toString(), text: newObjInputs[level] }];
+    await setDoc(doc(db, "settings", "objectives"), { [level]: updatedList }, { merge: true });
+    setNewObjInputs({...newObjInputs, [level]: ''});
+  };
+  const removeObj = async (level: string, id: string) => {
+    if(!window.confirm("Supprimer cet objectif ?")) return;
+    const updatedList = objectivesData[level].filter((o:any) => o.id !== id);
+    await setDoc(doc(db, "settings", "objectives"), { [level]: updatedList }, { merge: true });
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
@@ -637,6 +921,34 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks }:
           </div>
         </div>
       </div>
+      
+      {/* --- NOUVELLE SECTION : GESTION DES OBJECTIFS --- */}
+      <div className="bg-white p-6 shadow-sm border border-gray-200 lg:col-span-2 theme-card">
+        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><TrendingUp className="text-amber-500"/> Catalogue des Objectifs (Niveaux)</h3>
+        <p className="text-sm text-gray-500 mb-6">Ajoute les figures ou les réussites que les élèves doivent valider pour chaque niveau.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {[{key: 'bronze', name: 'Niveau 1 (Bronze)', color: 'bg-orange-50 border-orange-200 text-orange-900', btn: 'bg-orange-500 hover:bg-orange-600'}, 
+            {key: 'silver', name: 'Niveau 2 (Argent)', color: 'bg-gray-50 border-gray-300 text-gray-800', btn: 'bg-gray-500 hover:bg-gray-600'}, 
+            {key: 'gold', name: 'Niveau 3 (Or)', color: 'bg-yellow-50 border-yellow-300 text-yellow-900', btn: 'bg-yellow-500 hover:bg-yellow-600'}].map(lvl => (
+            <div key={lvl.key} className={`border p-4 rounded-xl shadow-sm ${lvl.color}`}>
+               <h4 className="font-black mb-3">{lvl.name}</h4>
+               <div className="flex gap-2 mb-4">
+                 <input type="text" value={newObjInputs[lvl.key]} onChange={e => setNewObjInputs({...newObjInputs, [lvl.key]: e.target.value})} placeholder="Nouvelle figure..." className="flex-1 p-2 border rounded-lg text-sm outline-none theme-btn bg-white" />
+                 <button onClick={() => handleAddObj(lvl.key)} className={`px-3 py-2 text-white font-bold rounded-lg theme-btn ${lvl.btn}`}><Plus size={16}/></button>
+               </div>
+               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                 {(!objectivesData[lvl.key] || objectivesData[lvl.key].length === 0) ? <p className="text-xs opacity-50 italic">Aucun objectif</p> : objectivesData[lvl.key].map((o:any) => (
+                   <div key={o.id} className="flex justify-between items-center bg-white p-2 rounded border border-gray-100 shadow-sm text-sm">
+                     <span className="font-bold truncate pr-2">{o.text}</span>
+                     <button onClick={() => removeObj(lvl.key, o.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                   </div>
+                 ))}
+               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="bg-white p-6 shadow-sm border border-amber-200 lg:col-span-2 ring-4 ring-amber-50 theme-card"><h3 className="font-bold text-amber-900 mb-4 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Offres de la Boutique (Crédits)</h3><form onSubmit={addPack} className="flex flex-col md:flex-row gap-2 mb-4"><input value={newPack.name} onChange={e=>setNewPack({...newPack, name: e.target.value})} placeholder="Nom (Ex: Carte 10 cours)" className="flex-[2] p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.qty} onChange={e=>setNewPack({...newPack, qty: Number(e.target.value)})} placeholder="Crédits" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.price} onChange={e=>setNewPack({...newPack, price: Number(e.target.value)})} placeholder="Prix (€)" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.validityDays} onChange={e=>setNewPack({...newPack, validityDays: Number(e.target.value)})} placeholder="Validité (jours)" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/>{editingPackId && <button type="button" onClick={()=>{setEditingPackId(null); setNewPack({name:'',price:0,qty:1,validityDays:90});}} className="bg-gray-200 text-gray-700 font-bold px-4 py-2 theme-btn">Annuler</button>}<button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 transition-colors theme-btn">{editingPackId ? 'MAJ' : 'Ajouter'}</button></form><div className="grid grid-cols-1 md:grid-cols-2 gap-2">{creditPacks.map((p:any) => (<div key={p.id} className="flex justify-between items-center bg-amber-50 p-3 border border-amber-100 theme-card"><div><p className="font-bold text-amber-900">{p.name}</p><p className="text-xs text-amber-700">{p.qty} crédits • {p.price}€ • Valable {p.validityDays}j</p></div><div className="flex gap-1"><button onClick={() => {setEditingPackId(p.id); setNewPack({name: p.name, price: p.price, qty: p.qty, validityDays: p.validityDays});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removePack(p.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
       <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><MapIcon className="text-indigo-500"/> Gestion des Lieux</h3><div className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 border border-gray-200 theme-card"><input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="Nom du lieu" className="p-2 border outline-none theme-btn"/><input value={newLocAddress} onChange={e=>setNewLocAddress(e.target.value)} placeholder="Adresse complète" className="p-2 border outline-none theme-btn"/><div className="flex gap-2">{editingLocId && <button onClick={()=>{setEditingLocId(null); setNewLocName(''); setNewLocAddress('');}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 theme-btn">Annuler</button>}<button onClick={addLocation} className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 transition-colors theme-btn">{editingLocId ? 'MAJ' : 'Ajouter'}</button></div></div><div className="space-y-2">{locations.map((l:any) => (<div key={l.id} className="flex justify-between items-center bg-white p-3 border shadow-sm theme-card"><div><p className="font-bold text-sm">{l.name}</p></div><div className="flex gap-1"><button onClick={() => {setEditingLocId(l.id); setNewLocName(l.name); setNewLocAddress(l.address);}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeLocation(l.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
       <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card">
@@ -864,14 +1176,13 @@ export default function App() {
   const [isBoutiqueOpen, setBoutiqueOpen] = useState(false); const [isPaymentInfoOpen, setPaymentInfoOpen] = useState(false); const [bookingSuccessData, setBookingSuccessData] = useState<DanceClass | null>(null);
   const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
   const [devUsers, setDevUsers] = useState<UserProfile[]>([]);
+  const [objectivesData, setObjectivesData] = useState<any>({ bronze: [], silver: [], gold: [] });
   
   // CALCUL DES RÔLES EFFECTIFS (Avec le Simulateur)
   const isRealDevAdmin = userProfile?.role === 'dev-admin';
   const effectiveUser = impersonatedUserId ? devUsers.find(u => u.id === impersonatedUserId) || userProfile : userProfile;
   const isAdmin = simulatedRole === 'admin' || (simulatedRole === '' && (effectiveUser?.role === 'admin' || effectiveUser?.role === 'dev-admin'));
   const todayDate = simulatedDate ? new Date(simulatedDate) : new Date();
-  
-  const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING') || myPurchases.some(p => p.status === 'PENDING');
   const [hasInvoiceAlert, setHasInvoiceAlert] = useState(false);
 
   useEffect(() => {
@@ -923,6 +1234,7 @@ export default function App() {
     onSnapshot(doc(db, "settings", "general"), (docSnap) => { if (docSnap.exists()) { const data = docSnap.data(); setLocations(data.locations || []); setTemplates(data.templates || []); setCreditPacks(data.creditPacks || []); setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); } else setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); }); 
     onSnapshot(doc(db, "settings", "theme"), (docSnap) => { if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); });
   }, [simulatedDate]);
+    onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { if (docSnap.exists()) setObjectivesData(docSnap.data()); else setDoc(doc(db, "settings", "objectives"), { bronze: [], silver: [], gold: [] }); });
 
   useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
   useEffect(() => { if (isRealDevAdmin) { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [isRealDevAdmin]);
@@ -959,7 +1271,6 @@ export default function App() {
       alert("Réservation annulée !"); fetchAllData();
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
-
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
   const closeUserPopup = async () => { if (!effectiveUser) return; try { await updateDoc(doc(db, "users", effectiveUser.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' } as UserProfile); } catch (e) { console.error(e); } };
 
@@ -969,6 +1280,16 @@ export default function App() {
   const activeCreds = effectiveUser ? getActiveCredits(effectiveUser) : 0; 
   const unreadNotifs = notifications.filter(n => !n.read).length;
   const hasClassToday = classes.some(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayDate.toLocaleDateString('fr-FR'));
+
+  // On vérifie les paiements en attente (hors espèces)
+  const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING' && b.paymentMethod !== 'CASH') || myPurchases.some(p => p.status === 'PENDING');
+
+  // Calcul des données pour la barre de progression Élève
+  const studentLevel = effectiveUser?.currentLevel || 1;
+  const studentObjLevelData = studentLevel === 1 ? objectivesData.bronze : studentLevel === 2 ? objectivesData.silver : objectivesData.gold;
+  const studentValidated = effectiveUser?.validatedObjectives || [];
+  const studentProgress = studentObjLevelData?.length ? Math.round((studentObjLevelData.filter((o:any) => studentValidated.includes(o.id)).length / studentObjLevelData.length) * 100) : 0;
+  const studentTier = getProgressTier(studentProgress);
 
   const tomorrow = new Date(todayDate); tomorrow.setDate(tomorrow.getDate() + 1); const tomorrowStr = tomorrow.toLocaleDateString('fr-FR');
   const hasClassTomorrow = myBookings.some(b => new Date(b.date).toLocaleDateString('fr-FR') === tomorrowStr);
@@ -981,12 +1302,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 p-3 sm:p-4 md:p-8 text-gray-900 pb-32 text-left w-full transition-all duration-300">
       <style dangerouslySetInnerHTML={{__html: `
-        :root {
-          --app-font: ${themeSettings?.fontFamily || 'ui-sans-serif, system-ui, sans-serif'};
-          --app-font-size: ${themeSettings?.fontSize || '16px'};
-          --app-card-radius: ${themeSettings?.cardRadius || '16px'};
-          --app-btn-radius: ${themeSettings?.btnRadius || '12px'};
-        }
+        :root { --app-font: ${themeSettings?.fontFamily || 'ui-sans-serif, system-ui, sans-serif'}; --app-font-size: ${themeSettings?.fontSize || '16px'}; --app-card-radius: ${themeSettings?.cardRadius || '16px'}; --app-btn-radius: ${themeSettings?.btnRadius || '12px'}; }
         @keyframes flash-vif { 0%, 100% { background-color: #ef4444; color: white; border-color: #fca5a5; transform: scale(1); } 50% { background-color: #f59e0b; color: black; border-color: #fde68a; transform: scale(1.02); } }
         .animate-flash-vif { animation: flash-vif 1.5s infinite; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -999,9 +1315,7 @@ export default function App() {
         
         {/* BOUÉE DE SAUVETAGE POUR LE SIMULATEUR */}
         {(simulatedRole || simulatedDate || impersonatedUserId) && (
-           <button onClick={() => {setSimulatedRole(''); setSimulatedDate(''); setImpersonatedUserId('');}} className="fixed bottom-6 right-6 z-[9999] bg-red-600 hover:bg-red-700 text-white font-black px-6 py-4 rounded-full shadow-2xl flex gap-2 items-center animate-bounce border-4 border-red-200">
-              🔴 Quitter Mode Test
-           </button>
+           <button onClick={() => {setSimulatedRole(''); setSimulatedDate(''); setImpersonatedUserId('');}} className="fixed bottom-6 right-6 z-[9999] bg-red-600 hover:bg-red-700 text-white font-black px-6 py-4 rounded-full shadow-2xl flex gap-2 items-center animate-bounce border-4 border-red-200">🔴 Quitter Mode Test</button>
         )}
 
         {!devVis.hideHeader && (
@@ -1009,20 +1323,14 @@ export default function App() {
             <div className="flex items-center gap-3 sm:gap-4">
                {tLogo ? <img src={tLogo} className="h-10 sm:h-14 object-contain drop-shadow-sm" alt="Logo"/> : (authUser?.photoURL && <img src={authUser.photoURL} className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 border-amber-200 shadow-sm"/>)}
                <div>
-               <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight flex items-center gap-2">
-  Bonjour {
-    impersonatedUserId 
-    ? effectiveUser?.displayName?.split(' ')[0] 
-    : authUser?.displayName?.split(' ')[0]
-  }
-  {impersonatedUserId && (
-    <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black animate-pulse">
-      👻 MODE FANTÔME
-    </span>
-  )}
-</h1>
+                 <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight flex items-center gap-2">
+                    Bonjour {impersonatedUserId ? effectiveUser?.displayName?.split(' ')[0] : authUser?.displayName?.split(' ')[0]}
+                    {impersonatedUserId && <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black animate-pulse">👻 FANTÔME</span>}
+                 </h1>
                  <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-1 sm:gap-y-2 text-xs sm:text-sm mt-1 sm:mt-2">
-                   <button onClick={() => setPaymentInfoOpen(true)} className={`font-bold px-3 py-1 sm:px-4 sm:py-1.5 transition-all border-2 theme-btn ${hasPendingPayments ? 'bg-red-50 text-red-600 border-red-500 animate-pulse' : 'bg-white text-gray-700 border-gray-200'}`}>Moyens de paiement</button>
+                   {!isAdmin && hasPendingPayments && (
+                     <button onClick={() => setPaymentInfoOpen(true)} className="font-bold px-3 py-1 sm:px-4 sm:py-1.5 transition-all border-2 theme-btn bg-red-50 text-red-600 border-red-500 animate-pulse">Paiement en attente</button>
+                   )}
                    <button onClick={() => setShowProfile(true)} className="text-gray-500 font-medium hover:text-amber-600">Mon Profil</button>
                    <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
                  </div>
@@ -1037,13 +1345,16 @@ export default function App() {
                   </div>
                 )}
                 
-                {(!isAdmin || !hasClassToday) && (
-                  <>
-                    <a href="https://www.instagram.com/verticali.poledance/" target="_blank" rel="noreferrer" className="p-2 sm:p-3 bg-white border border-gray-200 shadow-sm transition-colors text-pink-600 hover:bg-pink-50 theme-btn" title="Instagram Vertic'Ali"><Instagram size={18} className="sm:w-5 sm:h-5"/></a>
-                    <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
-                    <button onClick={() => setBoutiqueOpen(true)} className="flex-1 sm:flex-none px-3 py-2 sm:px-4 sm:py-2.5 text-white shadow-md text-xs sm:text-sm font-bold flex justify-center gap-1.5 sm:gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={16} className="sm:w-[18px] sm:h-[18px]" /> Boutique</button>
-                  </>
+                {!isAdmin && (
+                  <div className="flex gap-2 sm:gap-3 items-center w-full sm:w-auto">
+                    {activeCreds > 0 ? (
+                      <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
+                    ) : (
+                      <button onClick={() => setBoutiqueOpen(true)} className="flex-1 sm:flex-none px-3 py-2 sm:px-4 sm:py-2.5 text-white shadow-md text-xs sm:text-sm font-bold flex justify-center gap-1.5 sm:gap-2 items-center transition-opacity hover:opacity-90 bg-gradient-to-r from-amber-500 to-amber-600 theme-btn"><ShoppingBag size={16} className="sm:w-[18px] sm:h-[18px]" /> Boutique</button>
+                    )}
+                  </div>
                 )}
+                
                 {(isAdmin && hasClassToday) && (
                   <button onClick={() => setActiveTab('admin_today')} className="flex-1 sm:flex-none px-4 py-2 sm:py-2.5 shadow-xl text-xs sm:text-sm font-black flex justify-center gap-2 items-center animate-flash-vif theme-btn border-2"><Clock size={18} className="sm:w-5 sm:h-5" /> COURS DU JOUR !</button>
                 )}
@@ -1052,42 +1363,51 @@ export default function App() {
           </header>
         )}
 
-        {/* BANDEAU J-1 (Si un cours est prévu demain pour l'élève) */}
+        {/* BANDEAU J-1 */}
         {hasClassTomorrow && !isAdmin && (
-           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-4 sm:p-5 rounded-2xl mb-6 shadow-md flex items-center gap-4 theme-card">
-              <span className="text-3xl sm:text-4xl">🎒</span>
-              <div><p className="font-black text-lg sm:text-xl">Prépare ton sac !</p><p className="text-xs sm:text-sm font-medium opacity-90">Tu as un cours prévu avec nous demain. N'oublie pas ta gourde !</p></div>
-           </div>
+           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-4 sm:p-5 rounded-2xl mb-6 shadow-md flex items-center gap-4 theme-card"><span className="text-3xl sm:text-4xl">🎒</span><div><p className="font-black text-lg sm:text-xl">Prépare ton sac !</p><p className="text-xs sm:text-sm font-medium opacity-90">Tu as un cours prévu avec nous demain. N'oublie pas ta gourde !</p></div></div>
+        )}
+
+        {/* BARRE DE PROGRESSION OBJECTIFS ÉLÈVE */}
+        {!isAdmin && effectiveUser && (
+          <div className="mb-6 bg-white border border-gray-200 p-4 rounded-2xl shadow-sm flex items-center justify-between gap-4 theme-card cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setActiveTab('objectives')}>
+             <div className="flex items-center gap-3 w-full">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center font-black text-lg border-2" style={{backgroundColor: studentTier.color, color: studentTier.text, borderColor: studentTier.border}}>{studentLevel}</div>
+                <div className="flex-1">
+                <div className="flex justify-between items-end mb-1"><span className="font-bold text-gray-800 text-sm hidden sm:inline">Niveau {studentLevel}</span><span className="font-bold text-gray-800 text-sm sm:hidden">Niveau {studentLevel}</span><span className="text-xs font-black text-gray-400">{studentProgress}%</span></div>
+                   <div className="w-full bg-gray-100 rounded-full h-2.5"><div className="h-2.5 rounded-full transition-all duration-1000" style={{width: `${studentProgress}%`, backgroundColor: studentTier.color === '#f3f4f6' ? '#d1d5db' : studentTier.color}}></div></div>
+                </div>
+             </div>
+          </div>
         )}
 
         {effectiveUser && !effectiveUser.hasFilledForm && (
-          <div className="bg-red-50 border-2 border-red-200 p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 shadow-sm theme-card">
-            <div className="flex items-center gap-3 sm:gap-4 text-red-800 font-medium text-sm sm:text-base"><div className="p-2 sm:p-3 bg-red-100 rounded-full"><AlertTriangle size={24} className="text-red-600 sm:w-7 sm:h-7" /></div><div><p className="font-bold text-base sm:text-lg mb-0.5 sm:mb-1">Dernière étape !</p><p className="text-xs sm:text-sm opacity-90">Pour réserver, tu dois obligatoirement compléter tes coordonnées.</p></div></div>
-            <button onClick={() => setShowProfile(true)} className="w-full md:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-black shadow-lg flex justify-center gap-2 theme-btn"><UserPlus size={16} className="sm:w-[18px] sm:h-[18px]"/> Compléter mon profil</button>
-          </div>
+          <div className="bg-red-50 border-2 border-red-200 p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 shadow-sm theme-card"><div className="flex items-center gap-3 sm:gap-4 text-red-800 font-medium text-sm sm:text-base"><div className="p-2 sm:p-3 bg-red-100 rounded-full"><AlertTriangle size={24} className="text-red-600 sm:w-7 sm:h-7" /></div><div><p className="font-bold text-base sm:text-lg mb-0.5 sm:mb-1">Dernière étape !</p><p className="text-xs sm:text-sm opacity-90">Pour réserver, tu dois obligatoirement compléter tes coordonnées.</p></div></div><button onClick={() => setShowProfile(true)} className="w-full md:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-black shadow-lg flex justify-center gap-2 theme-btn"><UserPlus size={16} className="sm:w-[18px] sm:h-[18px]"/> Compléter mon profil</button></div>
         )}
 
         {!devVis.hideTabs && (
           <nav className="flex overflow-x-auto hide-scrollbar gap-1 sm:gap-2 mb-6 sm:mb-8 bg-white p-1.5 shadow-sm border border-gray-100 theme-card">
-          <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tHomeStr}</span></button>
-          <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tPlanStr}</span></button>
-          {!isAdmin && <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">{tHistStr}</span></button>}
-          
-          {isAdmin && (
-            <>
-              <div className="w-px bg-gray-200 my-1 sm:my-2 mx-1 shrink-0"></div>
-              <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><LayoutDashboard size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Tableau de Bord</span></button>
-              <button onClick={() => setActiveTab('admin_invoices')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><FileText size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Factures</span></button>
-              <button onClick={() => setActiveTab('admin_students')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_students' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Users size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Élèves</span></button>
-              <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_past' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Archive size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Archives</span></button>
-              <button onClick={() => setActiveTab('admin_today')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_today' ? 'bg-amber-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Clock size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Cours du jour</span></button>
-              <button onClick={() => setActiveTab('admin_settings')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Settings size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Réglages</span></button>
-            </>
-          )}
-          {isRealDevAdmin && (
-             <button onClick={() => setActiveTab('dev_admin')} className="flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap ml-auto transition-colors" style={activeTab === 'dev_admin' ? {backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'} : {backgroundColor: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '12px'}}><Code size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm">Dev</span></button>
-          )}
-        </nav>
+            <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHomeStr}</span></button>
+            <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tPlanStr}</span></button>
+            {!isAdmin && <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHistStr}</span></button>}
+            {!isAdmin && <button onClick={() => setActiveTab('objectives')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'objectives' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><TrendingUp size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Objectifs</span></button>}
+            
+            {isAdmin && (
+              <>
+                <div className="w-px bg-gray-200 my-1 sm:my-2 mx-1 shrink-0"></div>
+                <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_dashboard' ? 'bg-green-100 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><LayoutDashboard size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Tableau de Bord</span></button>
+                <button onClick={() => setActiveTab('admin_invoices')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${hasInvoiceAlert ? 'bg-red-100 text-red-600 animate-pulse' : activeTab === 'admin_invoices' ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><FileText size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Factures</span></button>
+                <button onClick={() => setActiveTab('admin_students')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_students' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Users size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Élèves</span></button>
+                <button onClick={() => setActiveTab('admin_objectives')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_objectives' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><TrendingUp size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Objectifs</span></button>
+                <button onClick={() => setActiveTab('admin_past')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_past' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Archive size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Archives</span></button>
+                <button onClick={() => setActiveTab('admin_today')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_today' ? 'bg-amber-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Clock size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Cours du jour</span></button>
+                <button onClick={() => setActiveTab('admin_settings')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap theme-btn ${activeTab === 'admin_settings' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Settings size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden lg:inline">Réglages</span></button>
+              </>
+            )}
+            {isRealDevAdmin && (
+               <button onClick={() => setActiveTab('dev_admin')} className="flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap ml-auto transition-colors" style={activeTab === 'dev_admin' ? {backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'} : {backgroundColor: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '12px'}}><Code size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Dev</span></button>
+            )}
+          </nav>
         )}
 
         {activeTab === 'accueil' && (
@@ -1127,7 +1447,9 @@ export default function App() {
         {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
         {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab onImpersonate={(id) => {setImpersonatedUserId(id); setActiveTab('planning');}} />}
         {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
-        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} />}
+        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} />}
+        {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
+        {activeTab === 'admin_objectives' && isAdmin && <AdminObjectivesTab users={devUsers} objectivesData={objectivesData} />}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
       </div>
 
