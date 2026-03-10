@@ -20,7 +20,7 @@ export const DB_PREFIX = isDemoMode ? 'demo_' : '';
 // --- CONFIGURATION ---
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
 const GOOGLE_EMAIL_URL = "https://script.google.com/macros/s/AKfycbytPtkOpS6vrQvs6DWYYd2g5XWL5mRZD8dbvxCrUfZhMrK-t4JJHMkv65Av8m8P8hCF/exec";
-const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbzkbA7tdrY7fm__XsCe3VPrYzTvemzKPZCa5XI1m-Ys8IYfq03f_psXU3AZ2xZVaTcI-Q/exec";
+export const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbzkbA7tdrY7fm__XsCe3VPrYzTvemzKPZCa5XI1m-Ys8IYfq03f_psXU3AZ2xZVaTcI-Q/exec";
 
 // --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
