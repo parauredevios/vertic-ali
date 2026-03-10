@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Palette, Type, Square, MessageSquare, Mail, EyeOff, Ghost
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -959,7 +959,7 @@ export default function App() {
       alert("Réservation annulée !"); fetchAllData();
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
-  const handleCancelBoutiqueOrder = async (id: string) => { if (!window.confirm("Es-tu sûre de vouloir annuler cette commande ?")) return; try { await deleteDoc(doc(db, "credit_purchases", id)); alert("Commande annulée !"); } catch(e) { alert("Erreur."); } };
+
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
   const closeUserPopup = async () => { if (!effectiveUser) return; try { await updateDoc(doc(db, "users", effectiveUser.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' } as UserProfile); } catch (e) { console.error(e); } };
 
