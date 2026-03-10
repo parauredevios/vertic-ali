@@ -420,13 +420,12 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false); const [editProfileData, setEditProfileData] = useState<Partial<UserProfile>>({});
 
-  useEffect(() => { const unsub = onSnapshot(query(collection(db, "users")), (snap) => setdevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsub(); }, []);
   useEffect(() => {
     if (selectedUserId) {
       const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", selectedUserId)), (snap) => { setUserBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))); });
@@ -437,9 +436,9 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: a
     }
   }, [selectedUserId, users]);
 
-  const handleManualCredit = async (u: UserProfile, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
-  const handleSaveMemo = async (u: UserProfile) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
-  const handleSaveAdminProfileEdit = async (u: UserProfile) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
+  const handleManualCredit = async (u:any, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find(p => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
+  const handleSaveMemo = async (u: any) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
+  const handleSaveAdminProfileEdit = async (u: any) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
 
   const filteredUsers = users.filter(u => u.role !== 'admin' && u.role !== 'dev-admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
   const selectedUser = users.find(u => u.id === selectedUserId);
