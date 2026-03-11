@@ -261,11 +261,38 @@ const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClas
   const todayStr = today.toLocaleDateString('fr-FR');
   const todayClasses = classes.filter(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayStr).sort((a,b) => a.startAt.getTime() - b.startAt.getTime());
 
-  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
+  const togglePayment = async (bookingId: string, currentStatus: string, b: any) => {
+    if (b.paymentMethod === 'CREDIT') return; 
+
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
     const nowStr = new Date().toISOString();
-    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
-    syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: bookingData.price });
+
+    try {
+      await updateDoc(doc(db, "bookings", bookingId), {
+        paymentStatus: newStatus,
+        updatedAt: nowStr,
+        paidAt: newStatus === 'PAID' ? nowStr : null
+      });
+
+      setClassBookings(prev => prev.map(book => 
+        book.id === bookingId ? { ...book, paymentStatus: newStatus, paidAt: newStatus === 'PAID' ? nowStr : null } : book
+      ));
+
+      syncToSheet({
+        type: 'BOOKING_UPDATE',
+        classId: classInfo.id,
+        classTitle: classInfo.title,
+        date: classInfo.startAt.toLocaleDateString('fr-FR'),
+        time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
+        location: classInfo.location || '',
+        studentId: b.userId,
+        studentName: `${b.userName} (${b.paymentMethod})`,
+        paymentStatus: newStatus,
+        price: b.price
+      });
+    } catch (e) {
+      alert("Erreur lors de la mise à jour du paiement.");
+    }
   };
 
   return (
@@ -420,7 +447,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -677,8 +704,21 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
               <span className="font-bold text-gray-700">{u.displayName}</span>
               {b ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase">{b.paymentMethod === 'CASH' ? 'Sur place' : b.paymentMethod}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{b.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</span>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase">
+                    {b.paymentMethod === 'CASH' ? 'Sur place' : b.paymentMethod}
+                  </span>
+                  <button 
+                    onClick={() => togglePayment(b.id, b.paymentStatus, b)}
+                    disabled={b.paymentMethod === 'CREDIT'}
+                    className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded theme-btn transition-colors shadow-sm ${
+                      b.paymentStatus === 'PAID' 
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                        : 'bg-orange-100 text-orange-700 hover:bg-orange-200 cursor-pointer'
+                    } ${b.paymentMethod === 'CREDIT' ? 'opacity-75 cursor-not-allowed' : ''}`}
+                    title={b.paymentMethod === 'CREDIT' ? "Paiement par crédit non modifiable" : "Cliquez pour changer l'état"}
+                  >
+                    {b.paymentStatus === 'PAID' ? '✅ Payé' : '⏳ À régler'}
+                  </button>
                 </div>
               ) : <span className="text-[10px] text-gray-400">Non réservé</span>}
             </div>
@@ -688,14 +728,23 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
 
       {classInfo.attendeesCount < classInfo.maxCapacity && (
         <div className="mt-2 pt-2 border-t border-gray-200 flex flex-col gap-2">
-           <div className="flex gap-2">
-             <select value={manualUserId} onChange={e => setManualUserId(e.target.value)} className="flex-1 p-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg outline-none bg-white theme-btn">
+           <div className="flex gap-2 items-stretch">
+             <select 
+               value={manualUserId} 
+               onChange={e => setManualUserId(e.target.value)} 
+               className="flex-1 min-w-0 p-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg outline-none bg-white theme-btn"
+             >
                <option value="">-- Ajouter un(e) élève --</option>
-               <option value="NEW_STUDENT">➕ Créer une nouvelle élève</option>
-               {availableUsers.map(u => <option key={u.id} value={u.id}>{u.displayName}</option>)}
+               <option value="NEW_STUDENT">➕ Créer un profil</option>
+               {availableUsers.map((u: any) => <option key={u.id} value={u.id}>{u.displayName}</option>)}
              </select>
+             
              {manualUserId !== 'NEW_STUDENT' && (
-               <button onClick={handleManualAdd} disabled={!manualUserId || isAdding} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg disabled:opacity-50 theme-btn transition-colors">
+               <button 
+                 onClick={handleManualAdd} 
+                 disabled={!manualUserId || isAdding} 
+                 className="shrink-0 whitespace-nowrap px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg disabled:opacity-50 theme-btn transition-colors"
+               >
                  {isAdding ? '...' : '+ Ajouter'}
                </button>
              )}
