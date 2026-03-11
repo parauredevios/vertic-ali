@@ -670,30 +670,63 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
     const nowStr = new Date().toISOString();
 
     try {
+      // 1. Mise à jour Firebase
       await updateDoc(doc(db, "bookings", bookingId), {
         paymentStatus: newStatus,
         updatedAt: nowStr,
         paidAt: newStatus === 'PAID' ? nowStr : null
       });
 
+      // 2. Mise à jour écran
       setClassBookings((prev: any[]) => prev.map((book: any) => 
         book.id === bookingId ? { ...book, paymentStatus: newStatus, paidAt: newStatus === 'PAID' ? nowStr : null } : book
       ));
 
+      // 3. Si le cours est marqué comme PAYÉ, on génère et on envoie la facture
+      if (newStatus === 'PAID') {
+        const docPDF = new jsPDF();
+        // On utilise la même logique que ton bouton de téléchargement habituel
+        const invNumber = await getB2CInvoiceIndex(bookingId, new Date());
+        const dateStr = new Date().toLocaleDateString('fr-FR');
+        
+        // On prépare le PDF (le moteur de l'application)
+        await renderInvoiceBase(docPDF, "FACTURE", invNumber, dateStr, b.userName.replace(" (Manuel)", ""), "");
+        
+        // Contenu de la facture
+        docPDF.setFont("helvetica", "normal");
+        docPDF.text(`Cours : ${classInfo.title}`, 20, 110);
+        const priceVal = `${(b.price || '0').replace('€', '').trim()},00 €`;
+        docPDF.text("1", 112, 110); docPDF.text(priceVal, 130, 110); docPDF.text("0", 160, 110); docPDF.text(priceVal, 175, 110);
+        renderInvoiceFooter(docPDF, priceVal);
+
+        // 🚀 ENVOI VERS GOOGLE DRIVE
+        const pdfBase64 = docPDF.output('datauristring').split(',')[1];
+        const fileName = `Facture_${b.userName.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'-')}.pdf`;
+
+        fetch(GOOGLE_DRIVE_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: 'DRIVE_SAVE',
+            pdfBase64: pdfBase64,
+            fileName: fileName
+          })
+        });
+      }
+
+      // 4. Synchro Sheet classique
       syncToSheet({
         type: 'BOOKING_UPDATE',
         classId: classInfo.id,
         classTitle: classInfo.title,
-        date: classInfo.startAt.toLocaleDateString('fr-FR'),
-        time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
-        location: classInfo.location || '',
-        studentId: b.userId,
         studentName: `${b.userName} (${b.paymentMethod})`,
         paymentStatus: newStatus,
         price: b.price
       });
+
     } catch (e) {
-      alert("Erreur lors de la mise à jour du paiement.");
+      alert("Erreur lors de la mise à jour.");
     }
   };
 
