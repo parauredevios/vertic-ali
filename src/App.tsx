@@ -420,7 +420,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -1301,21 +1301,47 @@ export default function App() {
   
   useEffect(() => { 
     fetchAllData(); 
-    onSnapshot(doc(db, "settings", "general"), (docSnap) => { 
+    
+    // 1. Écoute des paramètres généraux (Accueil, etc.)
+    const unsubGeneral = onSnapshot(doc(db, "settings", "general"), (docSnap) => { 
       if (docSnap.exists()) { 
         const data = docSnap.data(); 
         setLocations(data.locations || []); 
         setTemplates(data.templates || []); 
         setCreditPacks(data.creditPacks || []); 
-        setGlobalSettings({ reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, welcomeText: data.welcomeText || '', welcomeImageUrl: data.welcomeImageUrl || '', welcomeTextSize: data.welcomeTextSize || 18, welcomeImageSize: data.welcomeImageSize || 50 }); 
-      } else {
-        setDoc(doc(db, "settings", "general"), { locations: [], templates: [], creditPacks: [], reminderDays: 3, welcomeText: '', welcomeImageUrl: '' }); 
+        setGlobalSettings({ 
+          reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, 
+          welcomeText: data.welcomeText || '', 
+          welcomeImageUrl: data.welcomeImageUrl || '', 
+          welcomeTextSize: data.welcomeTextSize || 18, 
+          welcomeImageSize: data.welcomeImageSize || 50 
+        }); 
       }
-      
-      // 👇 LA NOUVELLE LIGNE EST LÀ 👇
-      setSettingsLoading(false); 
+      // 🛡️ ON A SUPPRIMÉ LE 'setDoc' ICI. Si Firebase est lent, on attend, on n'écrase rien !
+      setSettingsLoading(false); // On lève le rideau de chargement
+    }); 
+    
+    // 2. Écoute du Thème visuel
+    const unsubTheme = onSnapshot(doc(db, "settings", "theme"), (docSnap) => { 
+      if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); 
     });
-    onSnapshot(doc(db, "settings", "theme"), (docSnap) => { if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); });
+
+    // 3. Écoute des Objectifs (Désormais DANS le useEffect et sécurisé)
+    const unsubObjectives = onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { 
+      if (docSnap.exists()) {
+        setObjectivesData(docSnap.data()); 
+      } else {
+        // 🛡️ On se contente d'afficher du vide à l'écran, on n'écrase plus Firebase !
+        setObjectivesData({ bronze: [], silver: [], gold: [] }); 
+      }
+    });
+
+    // Nettoyage quand on quitte
+    return () => {
+      unsubGeneral();
+      unsubTheme();
+      unsubObjectives();
+    }
   }, [simulatedDate]);
     onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { if (docSnap.exists()) setObjectivesData(docSnap.data()); else setDoc(doc(db, "settings", "objectives"), { bronze: [], silver: [], gold: [] }); });
 
