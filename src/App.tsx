@@ -20,7 +20,7 @@ export const DB_PREFIX = isDemoMode ? 'demo_' : '';
 // --- CONFIGURATION ---
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxqnW1O5bfVWLQpHuvXkouogYiUugO43jmEAB_QJMadCKfLFNpRXuf7XcZ6fg4ZGDG0w/exec"; 
 const GOOGLE_EMAIL_URL = "https://script.google.com/macros/s/AKfycbytPtkOpS6vrQvs6DWYYd2g5XWL5mRZD8dbvxCrUfZhMrK-t4JJHMkv65Av8m8P8hCF/exec";
-export const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbzkbA7tdrY7fm__XsCe3VPrYzTvemzKPZCa5XI1m-Ys8IYfq03f_psXU3AZ2xZVaTcI-Q/exec";
+export const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbx5GfF0RnZhVX0W7l4FG0SZg3mYhYDTEflr0A-zu2FN1nQdvhCJv42GOXmnOcqafQpRig/exec";
 
 // --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
@@ -153,12 +153,50 @@ const getB2CInvoiceIndex = async (targetId: string, invoiceDate: Date) => {
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: { title: string, startAt: Date, price?: string }) => {
   const invoiceDate = booking.paidAt ? new Date(booking.paidAt) : new Date(booking.date);
   const invNumber = await getB2CInvoiceIndex(booking.id, invoiceDate);
-  const doc = new jsPDF(); const dateStr = invoiceDate.toLocaleDateString('fr-FR'); const editionDateStr = dateStr.replace(/\//g,'-');
-  const clientName = booking.userName.replace(" (Manuel)", ""); const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
+  const doc = new jsPDF(); 
+  const dateStr = invoiceDate.toLocaleDateString('fr-FR'); 
+  const editionDateStr = dateStr.replace(/\//g,'-');
+  const clientName = booking.userName.replace(" (Manuel)", ""); 
+  const address = studentProfile?.street ? `${studentProfile.street}\n${studentProfile.zipCode || ''} ${studentProfile.city || ''}` : '';
+  
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
-  let rawPrice = classInfo.price || booking.price || '0'; rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); if (isNaN(Number(rawPrice))) rawPrice = "0"; const priceVal = `${rawPrice},00 €`;
-  doc.setFont("helvetica", "normal"); doc.text(`Cours : ${classInfo.title}`, 20, 110); doc.setFontSize(8); doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); doc.setFontSize(10); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`);
+  
+  let rawPrice = classInfo.price || booking.price || '0'; 
+  rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); 
+  if (isNaN(Number(rawPrice))) rawPrice = "0"; 
+  const priceVal = `${rawPrice},00 €`;
+  
+  doc.setFont("helvetica", "normal"); 
+  doc.text(`Cours : ${classInfo.title}`, 20, 110); 
+  doc.setFontSize(8); 
+  doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); 
+  doc.setFontSize(10); 
+  doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
+  renderInvoiceFooter(doc, priceVal); 
+
+  // 🚀 NOUVEAUTÉ : LE NOM AVEC "TEST_" ET L'ENVOI DRIVE
+  const prefix = isDemoMode ? "TEST_" : "";
+  const fileName = `${prefix}Facture_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`;
+
+  // 1. Sauvegarde sur l'ordinateur
+  doc.save(fileName);
+
+  // 2. Envoi silencieux vers Google Drive
+  try {
+    const pdfBase64 = doc.output('datauristring').split(',')[1];
+    fetch(GOOGLE_DRIVE_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: 'DRIVE_SAVE',
+        pdfBase64: pdfBase64,
+        fileName: fileName
+      })
+    });
+  } catch (e) {
+    console.log("Erreur envoi Drive:", e);
+  }
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
@@ -264,7 +302,7 @@ const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClas
   const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
     const nowStr = new Date().toISOString();
-    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
+    await updateDoc(doc(db, DB_PREFIX + "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
     syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: bookingData.price });
   };
 
@@ -671,7 +709,7 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
 
     try {
       // 1. Mise à jour Firebase
-      await updateDoc(doc(db, "bookings", bookingId), {
+      await updateDoc(doc(db, DB_PREFIX + "bookings", bookingId), {
         paymentStatus: newStatus,
         updatedAt: nowStr,
         paidAt: newStatus === 'PAID' ? nowStr : null
@@ -701,7 +739,8 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
 
         // 🚀 ENVOI VERS GOOGLE DRIVE
         const pdfBase64 = docPDF.output('datauristring').split(',')[1];
-        const fileName = `Facture_${b.userName.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'-')}.pdf`;
+        const prefix = isDemoMode ? "TEST_" : "";
+        const fileName = `${prefix}Facture_${b.userName.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'-')}.pdf`;
 
         fetch(GOOGLE_DRIVE_URL, {
           method: "POST",
@@ -1443,7 +1482,7 @@ export default function App() {
     const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
     try {
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        const classRef = doc(db, DB_PREFIX + "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
         if (!classData || !userData) throw "Erreur DB"; if ((classData.attendeeIds || []).includes(effectiveUser.id)) throw "Déjà inscrit !"; if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
         let newPacks = userData.creditPacks ? [...userData.creditPacks] : [];
         if (method === 'CREDIT') { const now = todayDate.getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
@@ -1460,7 +1499,7 @@ export default function App() {
       const q = query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
       if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus; }
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
+        const classRef = doc(db, DB_PREFIX + "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
         if (!classData || !userData) throw "Erreur DB"; if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { const updatedPacks = [...userData.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); }
         t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
