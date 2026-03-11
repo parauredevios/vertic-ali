@@ -261,38 +261,11 @@ const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClas
   const todayStr = today.toLocaleDateString('fr-FR');
   const todayClasses = classes.filter(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayStr).sort((a,b) => a.startAt.getTime() - b.startAt.getTime());
 
-  const togglePayment = async (bookingId: string, currentStatus: string, b: any) => {
-    if (b.paymentMethod === 'CREDIT') return; 
-
+  const togglePayment = async (bookingId: string, currentStatus: string, bookingData: any) => {
     const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
     const nowStr = new Date().toISOString();
-
-    try {
-      await updateDoc(doc(db, "bookings", bookingId), {
-        paymentStatus: newStatus,
-        updatedAt: nowStr,
-        paidAt: newStatus === 'PAID' ? nowStr : null
-      });
-
-      setClassBookings(prev => prev.map(book => 
-        book.id === bookingId ? { ...book, paymentStatus: newStatus, paidAt: newStatus === 'PAID' ? nowStr : null } : book
-      ));
-
-      syncToSheet({
-        type: 'BOOKING_UPDATE',
-        classId: classInfo.id,
-        classTitle: classInfo.title,
-        date: classInfo.startAt.toLocaleDateString('fr-FR'),
-        time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
-        location: classInfo.location || '',
-        studentId: b.userId,
-        studentName: `${b.userName} (${b.paymentMethod})`,
-        paymentStatus: newStatus,
-        price: b.price
-      });
-    } catch (e) {
-      alert("Erreur lors de la mise à jour du paiement.");
-    }
+    await updateDoc(doc(db, "bookings", bookingId), { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null });
+    syncToSheet({ type: 'BOOKING_UPDATE', classId: bookingData.classId, classTitle: bookingData.classTitle, date: bookingData.dateStr, time: bookingData.timeStr, location: bookingData.location || '', studentId: bookingData.userId, studentName: `${bookingData.userName} (${bookingData.paymentMethod})`, paymentStatus: newStatus, price: bookingData.price });
   };
 
   return (
@@ -447,7 +420,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
@@ -688,6 +661,40 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
       alert("Erreur lors de l'ajout.");
     }
     setIsAdding(false);
+  };
+
+  const togglePayment = async (bookingId: string, currentStatus: string, b: any) => {
+    if (b.paymentMethod === 'CREDIT') return; 
+
+    const newStatus = currentStatus === 'PAID' ? 'PENDING' : 'PAID';
+    const nowStr = new Date().toISOString();
+
+    try {
+      await updateDoc(doc(db, "bookings", bookingId), {
+        paymentStatus: newStatus,
+        updatedAt: nowStr,
+        paidAt: newStatus === 'PAID' ? nowStr : null
+      });
+
+      setClassBookings((prev: any[]) => prev.map((book: any) => 
+        book.id === bookingId ? { ...book, paymentStatus: newStatus, paidAt: newStatus === 'PAID' ? nowStr : null } : book
+      ));
+
+      syncToSheet({
+        type: 'BOOKING_UPDATE',
+        classId: classInfo.id,
+        classTitle: classInfo.title,
+        date: classInfo.startAt.toLocaleDateString('fr-FR'),
+        time: classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}),
+        location: classInfo.location || '',
+        studentId: b.userId,
+        studentName: `${b.userName} (${b.paymentMethod})`,
+        paymentStatus: newStatus,
+        price: b.price
+      });
+    } catch (e) {
+      alert("Erreur lors de la mise à jour du paiement.");
+    }
   };
 
   const availableUsers = allUsers.filter(u => u.role !== 'admin' && u.role !== 'dev-admin' && !(classInfo.attendeeIds || []).includes(u.id)).sort((a,b) => a.displayName.localeCompare(b.displayName));
