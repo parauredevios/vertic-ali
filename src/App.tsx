@@ -420,7 +420,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   );
 };
 
-const AdminStudentsTab = ({ users = [], setImpersonatedUserId, setActiveTab }: any) => {
+const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userBookings, setUserBookings] = useState<BookingInfo[]>([]); const [userPurchases, setUserPurchases] = useState<CreditPurchase[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'profile'>('history'); const [memoText, setMemoText] = useState(''); const [savingMemo, setSavingMemo] = useState(false);
