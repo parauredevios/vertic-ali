@@ -63,6 +63,61 @@ interface B2BInvoice {
 interface AppNotification { id: string; text: string; date: string; read: boolean; type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT'; }
 type PaymentMethod = 'CREDIT' | 'CASH' | 'WERO_RIB';
 
+// --- COMPOSANT DES PAGES LÉGALES ---
+const LegalPages = ({ page }: { page: 'mentions' | 'cgv' | 'confidentialite' }) => {
+  return (
+    <div className="bg-white p-8 md:p-12 rounded-3xl shadow-sm border border-gray-100 theme-card text-left text-gray-800">
+      <div className="max-w-3xl mx-auto bg-white p-8 md:p-12 rounded-3xl shadow-lg border border-gray-100">
+        <a href="/" className="inline-flex items-center gap-2 text-amber-600 font-bold hover:underline mb-8"><Home size={18}/> Retour au site</a>
+        
+        {page === 'mentions' && (
+          <div className="space-y-6">
+            <h1 className="text-3xl font-black text-gray-900 mb-8 border-b pb-4">Mentions Légales</h1>
+            <h2 className="text-xl font-bold text-amber-600">1. Éditeur du site</h2>
+            <p className="text-sm">Vertic'Ali (Entreprise individuelle)<br/>Responsable : Alison BOUTELEUX<br/>Adresse : 18 rue Maurice Domon, Appt C22, 80000 AMIENS<br/>Email : verticali.poledance@gmail.com<br/>Téléphone : 06.21.05.64.14<br/>SIRET : 94819885800029</p>
+            <h2 className="text-xl font-bold text-amber-600 mt-6">2. Hébergement</h2>
+            <p className="text-sm">Le site est hébergé par Firebase (Google LLC), 1600 Amphitheatre Parkway, Mountain View, California 94043 USA.</p>
+            <h2 className="text-xl font-bold text-amber-600 mt-6">2. Hébergement</h2>
+            <p className="text-sm">Le site est hébergé par Firebase (Google LLC), 1600 Amphitheatre Parkway, Mountain View, California 94043 USA.</p>
+            
+            <h2 className="text-xl font-bold text-amber-600 mt-6">3. Création du site</h2>
+            <p className="text-sm">Conception et développement web : <strong>Aurélien Parent</strong>.</p>
+          </div>
+        )}
+
+        {page === 'cgv' && (
+          <div className="space-y-6">
+            <h1 className="text-3xl font-black text-gray-900 mb-8 border-b pb-4">Conditions Générales de Vente (CGV)</h1>
+            <p className="text-sm italic text-gray-500">Dernière mise à jour : 15 Mars 2026</p>
+            <h2 className="text-xl font-bold text-amber-600">1. Objet</h2>
+            <p className="text-sm">Les présentes CGV régissent la vente de cours de pole dance et d'assouplissement dispensés par Vertic'Ali (Alison BOUTELEUX). L'achat d'un cours ou d'un carnet implique l'acceptation sans réserve de ces conditions.</p>
+            <h2 className="text-xl font-bold text-amber-600">2. Réservation et Annulation</h2>
+            <p className="text-sm leading-relaxed">La réservation se fait obligatoirement via le site web.<br/><strong>Politique d'annulation :</strong> Toute annulation d'un cours doit être effectuée au minimum <strong>24 heures à l'avance</strong>. Passé ce délai, le cours sera dû (le crédit sera décompté du carnet ou le paiement en espèces exigé au prochain cours), sauf présentation d'un certificat médical justifiant l'incapacité.</p>
+            <h2 className="text-xl font-bold text-amber-600">3. Validité des Carnets</h2>
+            <p className="text-sm leading-relaxed">Les carnets de crédits sont nominatifs, non remboursables (sauf déménagement ou inaptitude physique définitive justifiée) et ont une durée de validité stricte indiquée lors de l'achat (généralement 90 jours ou 1 an pour les gros carnets). Aucun report de validité ne sera accordé pour convenance personnelle.</p>
+            <h2 className="text-xl font-bold text-amber-600">4. Santé et Sécurité</h2>
+            <p className="text-sm">L'élève s'engage à être en bonne condition physique. Vertic'Ali décline toute responsabilité en cas de blessure due au non-respect des consignes de sécurité énoncées par le professeur.</p>
+          </div>
+        )}
+
+        {page === 'confidentialite' && (
+          <div className="space-y-6">
+            <h1 className="text-3xl font-black text-gray-900 mb-8 border-b pb-4">Politique de Confidentialité (RGPD)</h1>
+            <h2 className="text-xl font-bold text-amber-600">1. Collecte des données</h2>
+            <p className="text-sm leading-relaxed">Dans le cadre de son activité, Vertic'Ali collecte les données suivantes : Nom, Prénom, Adresse email, Numéro de téléphone, Date de naissance, Adresse postale, Contact d'urgence. Ces données sont obligatoires pour garantir la sécurité et la bonne gestion administrative des élèves.</p>
+            <h2 className="text-xl font-bold text-amber-600">2. Utilisation et Hébergement</h2>
+            <p className="text-sm leading-relaxed">Les données sont utilisées uniquement par Alison Bouteleux pour : la gestion des réservations, la facturation, et vous contacter en cas d'urgence ou d'annulation de cours. Elles sont stockées de manière sécurisée sur les serveurs de Google Firebase (qui respectent les normes de sécurité européennes).</p>
+            <h2 className="text-xl font-bold text-amber-600">3. Vos Droits (Accès et Suppression)</h2>
+            <p className="text-sm leading-relaxed">Conformément à la réglementation RGPD, vous disposez d'un droit d'accès, de rectification et de suppression de vos données. Vous pouvez modifier vos informations directement depuis la rubrique "Mon Profil" du site. Pour supprimer définitivement votre compte et votre historique, envoyez un simple email à <strong>verticali.poledance@gmail.com</strong>.</p>
+            <h2 className="text-xl font-bold text-amber-600">4. Cookies</h2>
+            <p className="text-sm leading-relaxed">Le site utilise uniquement des cookies "strictement nécessaires" au fonctionnement technique (maintien de votre connexion à votre compte via Firebase Auth). Aucun cookie publicitaire ou de suivi externe n'est utilisé.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- FONCTIONS UTILITAIRES ---
 const syncToSheet = async (payload: any) => {
   if (isDemoMode) {
@@ -779,17 +834,30 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
         attendees.map(u => {
           const b = classBookings.find(x => x.userId === u.id);
           return (
-            <div key={u.id} className="flex justify-between items-center bg-white p-2 border border-gray-100 rounded text-sm shadow-sm theme-card">
-              <span className="font-bold text-gray-700">{u.displayName}</span>
+              <div key={u.id} className="flex flex-col gap-1.5 bg-white p-2.5 border border-gray-100 rounded shadow-sm theme-card">
+              <span className="font-bold text-gray-700 text-xs sm:text-sm truncate w-full">{u.displayName}</span>
               {b ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase">
-                    {b.paymentMethod === 'CASH' ? 'Sur place' : b.paymentMethod}
-                  </span>
+                <div className="flex justify-between items-stretch gap-1.5 w-full">
+                  <select 
+                    value={b.paymentMethod}
+                    onChange={async (e) => {
+                      const newMethod = e.target.value;
+                      if(newMethod === b.paymentMethod) return;
+                      await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), { paymentMethod: newMethod });
+                      setClassBookings((prev: any[]) => prev.map((book: any) => book.id === b.id ? { ...book, paymentMethod: newMethod } : book));
+                    }}
+                    disabled={b.paymentMethod === 'CREDIT'}
+                    className={`flex-1 min-w-0 text-[10px] font-bold text-gray-600 uppercase border border-gray-200 rounded p-1.5 outline-none bg-white truncate ${b.paymentMethod === 'CREDIT' ? 'opacity-50' : 'cursor-pointer hover:border-amber-400'}`}
+                  >
+                    <option value="CASH">Espèces</option>
+                    <option value="WERO_RIB">Wero/Virement</option>
+                    <option value="CREDIT">Crédits</option>
+                  </select>
+
                   <button 
                     onClick={() => togglePayment(b.id, b.paymentStatus, b)}
                     disabled={b.paymentMethod === 'CREDIT'}
-                    className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded theme-btn transition-colors shadow-sm ${
+                    className={`shrink-0 flex items-center justify-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded theme-btn transition-colors shadow-sm whitespace-nowrap ${
                       b.paymentStatus === 'PAID' 
                         ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                         : 'bg-orange-100 text-orange-700 hover:bg-orange-200 cursor-pointer'
@@ -1289,13 +1357,47 @@ const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimR
 
 // --- MODALES INVISIBLES ---
 const BoutiqueModal = ({ isOpen, onClose, user, packs }: any) => {
+  const [selectedMethod, setSelectedMethod] = useState<'WERO_RIB' | 'CASH'>('WERO_RIB');
   if (!isOpen) return null; const activeCreds = getActiveCredits(user);
+  
   const handleBuy = async (pack: CreditPackTemplate) => {
-    if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ?`)) return;
-    try { await addDoc(collection(db, DB_PREFIX + "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: 'WERO_RIB', status: 'PENDING' }); await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName}`, 'BOUTIQUE'); alert("Commande enregistrée ! Effectue le paiement."); onClose(); } catch (e) {}
+    const methodText = selectedMethod === 'CASH' ? 'en Espèces' : 'par Wero/Virement';
+    if (!window.confirm(`Acheter "${pack.name}" pour ${pack.price}€ ${methodText} ?`)) return;
+    try { 
+      await addDoc(collection(db, DB_PREFIX + "credit_purchases"), { userId: user.id, userName: user.displayName, packId: pack.id, packName: pack.name, qty: pack.qty, price: pack.price, validityDays: pack.validityDays, date: new Date().toISOString(), paymentMethod: selectedMethod, status: 'PENDING' }); 
+      await sendNotification(`Nouvelle commande de crédits (${pack.name}) par ${user.displayName} (${methodText})`, 'BOUTIQUE'); 
+      alert("Commande enregistrée ! Effectue le paiement."); 
+      onClose(); 
+    } catch (e) {}
   };
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-md w-full shadow-2xl relative theme-card"><h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3><p className="text-gray-500 text-sm mb-6">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>{packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (<div className="space-y-4">{packs.map((p:any) => (<div key={p.id} className="border border-gray-200 p-4 flex justify-between items-center bg-gray-50 theme-card"><div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 text-white text-xs font-bold px-4 py-2 theme-btn">Commander</button></div></div>))}</div>)}<button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 theme-btn">Fermer</button></div></div>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left">
+      <div className="bg-white p-6 max-w-md w-full shadow-2xl relative theme-card">
+        <h3 className="text-2xl font-black text-gray-900 mb-2 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Boutique</h3>
+        <p className="text-gray-500 text-sm mb-4">Tu as actuellement <span className="font-bold text-amber-600">{activeCreds} crédits</span> valides.</p>
+        
+        <div className="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-2">Comment vas-tu payer ?</label>
+          <select value={selectedMethod} onChange={(e) => setSelectedMethod(e.target.value as 'WERO_RIB' | 'CASH')} className="w-full p-2 border rounded bg-white text-sm outline-none">
+            <option value="WERO_RIB">Wero / Virement</option>
+            <option value="CASH">Espèces au studio</option>
+          </select>
+        </div>
+
+        {packs.length === 0 ? <p className="text-gray-400">Aucune offre disponible.</p> : (
+          <div className="space-y-4 max-h-60 overflow-y-auto pr-1">
+            {packs.map((p:any) => (
+              <div key={p.id} className="border border-gray-200 p-4 flex justify-between items-center bg-gray-50 theme-card">
+                <div><h4 className="font-bold text-gray-800">{p.name}</h4><p className="text-xs text-gray-500">Valable {p.validityDays} jours</p></div>
+                <div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-amber-600">{p.price} €</span><button onClick={() => handleBuy(p)} className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-4 py-2 theme-btn">Commander</button></div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 theme-btn">Fermer</button>
+      </div>
+    </div>
   );
 };
 
@@ -1308,15 +1410,33 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
 };
 
 const UserProfileForm = ({ user, onClose }: any) => {
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const isFirstTime = !user.hasFilledForm;
   const [formData, setFormData] = useState({ birthDate: user.birthDate || '', street: user.street || '', zipCode: user.zipCode || '', city: user.city || '', phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || '' });
   const [health1, setHealth1] = useState(false); const [health2, setHealth2] = useState(false); const [health3, setHealth3] = useState(false); const [imageRights, setImageRights] = useState<'yes' | 'no' | null>(user.imageRights || null); const [saving, setSaving] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault(); if (isFirstTime) { if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); }
+    e.preventDefault(); if (isFirstTime) { 
+      if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); 
+      if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); 
+      if (!acceptTerms) return alert("⚠️ Tu dois accepter les CGV et la politique de confidentialité.");
+    }
     setSaving(true); try { await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true }); await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, adminMemo: user.adminMemo || '', ...formData }); if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅"); onClose(); } catch (e) { alert("Erreur."); } setSaving(false);
   };
-  return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative theme-card"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 mb-4 text-sm text-gray-500 border theme-card"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Date de Naissance et Téléphone</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border outline-none focus:border-amber-500 theme-btn" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border outline-none focus:border-amber-500 theme-btn" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold theme-btn">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-amber-500 text-white font-bold shadow-lg disabled:opacity-50 theme-btn">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
+  return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative theme-card"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 mb-4 text-sm text-gray-500 border theme-card"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Date de Naissance et Téléphone</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border outline-none focus:border-amber-500 theme-btn" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border outline-none focus:border-amber-500 theme-btn" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}{isFirstTime && (
+              <div className="pt-4 mt-2">
+                <label className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl cursor-pointer theme-card">
+                  <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500 shrink-0" required={isFirstTime} />
+                  <span className="text-sm font-bold text-amber-900 leading-tight">
+                    J'accepte les <button type="button" onClick={() => {onClose(); window.location.hash='#/cgv';}} className="text-amber-600 underline hover:text-amber-700">CGV</button> et la <button type="button" onClick={() => {onClose(); window.location.hash='#/confidentialite';}} className="text-amber-600 underline hover:text-amber-700">Politique de confidentialité</button>. J'autorise Vertic'Ali à stocker mes données.
+                  </span>
+                </label>
+              </div>
+            )}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold theme-btn">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-amber-500 text-white font-bold shadow-lg disabled:opacity-50 theme-btn">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
+  <label className="flex items-start gap-3 mt-4 p-3 bg-gray-100 border border-gray-200 rounded-xl cursor-pointer">
+              <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500 shrink-0" required={isFirstTime} />
+              <span className="text-sm font-bold text-gray-700">J'accepte les <a href="#/cgv" target="_blank" className="text-amber-600 underline">CGV</a> et la <a href="#/confidentialite" target="_blank" className="text-amber-600 underline">Politique de confidentialité</a>.</span>
+            </label>
 };
 
 const LoginScreen = () => {
@@ -1324,6 +1444,7 @@ const LoginScreen = () => {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState(''); const [lastName, setLastName] = useState('');
   const [error, setError] = useState(''); const [msg, setMsg] = useState(''); const [loading, setLoading] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => { e.preventDefault(); setError(''); setMsg(''); setLoading(true); try { await signInWithEmailAndPassword(auth, email, password); } catch (err) { setError('Email ou mot de passe incorrect.'); setLoading(false); } };
   
@@ -1332,6 +1453,7 @@ const LoginScreen = () => {
     if (password !== confirmPassword) { setError('Les mots de passe ne correspondent pas.'); setLoading(false); return; }
     if (!firstName || !lastName) { setError('Veuillez renseigner votre nom et prénom.'); setLoading(false); return; }
     if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); setLoading(false); return; }
+    if (!acceptTerms) { setError('Vous devez accepter les conditions générales et la politique de confidentialité.'); setLoading(false); return; }
     
     const domain = email.trim().toLowerCase().split('@')[1];
     const forbiddenDomains = ['yopmail.com', 'yopmail.fr', 'tempmail.com', '10minutemail.com', 'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'jetable.org'];
@@ -1342,7 +1464,19 @@ const LoginScreen = () => {
   
   const handleReset = async (e: React.FormEvent) => { e.preventDefault(); setError(''); setMsg(''); setLoading(true); try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien envoyé par email (Vérifiez vos spams).'); } catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); } setLoading(false); };
 
-  return (<div className="min-h-screen bg-gray-900 flex items-center justify-center p-4"><div className="bg-white p-8 shadow-2xl max-w-md w-full text-center theme-card"><div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div><h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>{error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}{msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}{mode === 'login' && (<form onSubmit={handleLogin} className="space-y-4"><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Mot de passe" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold disabled:opacity-50 theme-btn">Se connecter</button><div className="flex justify-between items-center text-sm mt-4 px-1"><button type="button" onClick={() => {setMode('reset'); setError(''); setMsg('');}} className="text-gray-500 hover:text-amber-600 font-medium">Mot de passe oublié ?</button><button type="button" onClick={() => {setMode('register'); setError(''); setMsg('');}} className="text-amber-600 font-bold hover:text-amber-700">Créer un compte</button></div></form>)}{mode === 'register' && (<form onSubmit={handleRegister} className="space-y-3"><div className="flex gap-2"><input type="text" required placeholder="Prénom" value={firstName} onChange={e=>setFirstName(e.target.value)} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Mot de passe (min 6 car.)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold disabled:opacity-50 mt-2 theme-btn">Créer mon compte</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button></form>)}{mode === 'reset' && (<form onSubmit={handleReset} className="space-y-4"><p className="text-sm text-gray-600 mb-4 font-medium">Entrez votre email pour recevoir un lien de réinitialisation.</p><input type="email" required placeholder="Votre Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold disabled:opacity-50 theme-btn">Envoyer le lien</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Retour à la connexion</button></form>)}<div className="mt-8 pt-6 border-t border-gray-100"><button type="button" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold py-3.5 px-4 flex items-center justify-center gap-3 transition-colors shadow-sm theme-btn"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> {mode === 'register' ? 'S\'inscrire avec Google' : 'Continuer avec Google'}</button></div></div></div>);
+  return (<div className="min-h-screen bg-gray-900 flex items-center justify-center p-4"><div className="bg-white p-8 shadow-2xl max-w-md w-full text-center theme-card"><div className="bg-white p-2 rounded-full shadow-sm mb-4 inline-block"><img src="/logo.png" alt="Logo" className="w-32 h-32 object-contain mx-auto"/></div><h1 className="text-2xl font-bold text-gray-800 mb-6">Vertic'Ali</h1>{error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">{error}</div>}{msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-sm rounded-xl font-medium border border-green-100">{msg}</div>}{mode === 'login' && (<form onSubmit={handleLogin} className="space-y-4"><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Mot de passe" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold disabled:opacity-50 theme-btn">Se connecter</button><div className="flex justify-between items-center text-sm mt-4 px-1"><button type="button" onClick={() => {setMode('reset'); setError(''); setMsg('');}} className="text-gray-500 hover:text-amber-600 font-medium">Mot de passe oublié ?</button><button type="button" onClick={() => {setMode('register'); setError(''); setMsg('');}} className="text-amber-600 font-bold hover:text-amber-700">Créer un compte</button></div></form>)}{mode === 'register' && (<form onSubmit={handleRegister} className="space-y-3"><div className="flex gap-2"><input type="text" required placeholder="Prénom" value={firstName} onChange={e=>setFirstName(e.target.value)} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="text" required placeholder="Nom" value={lastName} onChange={e=>setLastName(e.target.value)} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><input type="email" required placeholder="Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Mot de passe (min 6 car.)" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><input type="password" required placeholder="Confirmez le mot de passe" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex items-start gap-3 mt-4 text-left p-3 bg-gray-50 border border-gray-100 rounded-xl theme-card">
+              <input 
+                type="checkbox" 
+                id="rgpd" 
+                required
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+                className="mt-1 w-5 h-5 accent-amber-500 shrink-0 cursor-pointer"
+              />
+              <label htmlFor="rgpd" className="text-xs text-gray-600 font-medium leading-relaxed cursor-pointer">
+                J'accepte les <a href="#/cgv" target="_blank" className="text-amber-600 hover:underline">CGV</a> et la <a href="#/confidentialite" target="_blank" className="text-amber-600 hover:underline">Politique de confidentialité</a>. J'autorise Vertic'Ali à stocker mes données pour la gestion de mes réservations.
+              </label>
+            </div><button type="submit" disabled={loading} className="w-full py-3.5 bg-amber-500 text-white font-bold disabled:opacity-50 mt-2 theme-btn">Créer mon compte</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Déjà un compte ? Se connecter</button></form>)}{mode === 'reset' && (<form onSubmit={handleReset} className="space-y-4"><p className="text-sm text-gray-600 mb-4 font-medium">Entrez votre email pour recevoir un lien de réinitialisation.</p><input type="email" required placeholder="Votre Adresse Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><button type="submit" disabled={loading} className="w-full py-3.5 bg-gray-900 text-white font-bold disabled:opacity-50 theme-btn">Envoyer le lien</button><button type="button" onClick={() => {setMode('login'); setError(''); setMsg('');}} className="text-sm text-gray-500 hover:text-gray-800 mt-4 block w-full font-medium">Retour à la connexion</button></form>)}<div className="mt-8 pt-6 border-t border-gray-100"><button type="button" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold py-3.5 px-4 flex items-center justify-center gap-3 transition-colors shadow-sm theme-btn"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" /> {mode === 'register' ? 'S\'inscrire avec Google' : 'Continuer avec Google'}</button></div></div></div>);
 };
 
 export default function App() {
@@ -1354,7 +1488,7 @@ export default function App() {
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'accueil' | 'planning' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today'>('accueil');
+  const [activeTab, setActiveTab] = useState<'accueil' | 'planning' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today' | 'mentions' | 'cgv' | 'confidentialite'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
@@ -1477,7 +1611,14 @@ export default function App() {
   useEffect(() => { if (userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [userProfile?.role]);
 
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
-  const initiateBooking = (classId: string) => setPaymentModal({ isOpen: true, classId });
+  const initiateBooking = (classId: string) => {
+    if (!authUser) {
+      alert("👋 Bienvenue ! Veuillez vous créer un compte pour réserver votre cours.");
+      setActiveTab('history'); // On les renvoie vers l'écran de login
+      return;
+    }
+    setPaymentModal({ isOpen: true, classId });
+  };
   const confirmBooking = async (method: PaymentMethod) => {
     const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
     try {
@@ -1512,7 +1653,10 @@ export default function App() {
   const closeUserPopup = async () => { if (!effectiveUser) return; try { await updateDoc(doc(db, "users", effectiveUser.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' } as UserProfile); } catch (e) { console.error(e); } };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
-  if (!authUser) return <LoginScreen />;
+  // Autoriser l'accès sans login UNIQUEMENT pour l'accueil et le planning
+  if (!authUser && activeTab !== 'accueil' && activeTab !== 'planning') {
+    return <LoginScreen />;
+  }
   if (settingsLoading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
       <Loader2 className="animate-spin text-amber-500 mb-4" size={48} />
@@ -1566,16 +1710,22 @@ export default function App() {
             <div className="flex items-center gap-3 sm:gap-4">
                {tLogo ? <img src={tLogo} className="h-10 sm:h-14 object-contain drop-shadow-sm" alt="Logo"/> : (authUser?.photoURL && <img src={authUser.photoURL} className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 border-amber-200 shadow-sm"/>)}
                <div>
-                 <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight flex items-center gap-2">
-                    Bonjour {impersonatedUserId ? effectiveUser?.displayName?.split(' ')[0] : authUser?.displayName?.split(' ')[0]}
-                    {impersonatedUserId && <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black animate-pulse">👻 FANTÔME</span>}
+               <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight flex items-center gap-2">
+                   {authUser ? `Bonjour ${impersonatedUserId ? effectiveUser?.displayName?.split(' ')[0] : authUser.displayName?.split(' ')[0]}` : 'Bienvenue'}
+                   {impersonatedUserId && <span className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-black animate-pulse">👻 FANTÔME</span>}
                  </h1>
                  <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-1 sm:gap-y-2 text-xs sm:text-sm mt-1 sm:mt-2">
-                   {!isAdmin && hasPendingPayments && (
-                     <button onClick={() => setPaymentInfoOpen(true)} className="font-bold px-3 py-1 sm:px-4 sm:py-1.5 transition-all border-2 theme-btn bg-red-50 text-red-600 border-red-500 animate-pulse">Paiement en attente</button>
+                   {!authUser ? (
+                     <button onClick={() => setActiveTab('history')} className="text-amber-600 font-bold hover:text-amber-700">Se connecter / S'inscrire</button>
+                   ) : (
+                     <>
+                       {!isAdmin && hasPendingPayments && (
+                         <button onClick={() => setPaymentInfoOpen(true)} className="font-bold px-3 py-1 sm:px-4 sm:py-1.5 transition-all border-2 theme-btn bg-red-50 text-red-600 border-red-500 animate-pulse">Paiement en attente</button>
+                       )}
+                       <button onClick={() => setShowProfile(true)} className="text-gray-500 font-medium hover:text-amber-600">Mon Profil</button>
+                       <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
+                     </>
                    )}
-                   <button onClick={() => setShowProfile(true)} className="text-gray-500 font-medium hover:text-amber-600">Mon Profil</button>
-                   <button onClick={() => signOut(auth)} className="text-gray-500 hover:text-red-500">Déconnexion</button>
                  </div>
                </div>
             </div>
@@ -1596,7 +1746,7 @@ export default function App() {
                   </div>
                 )}
                 
-                {!isAdmin && (
+                {!isAdmin && authUser && (
   <div className="flex gap-2 sm:gap-3 items-center w-full sm:w-auto">
     {activeCreds > 0 ? (
       <div className="px-3 py-1.5 sm:px-4 sm:py-2.5 bg-white border border-gray-200 shadow-sm text-base sm:text-lg font-black flex gap-1.5 sm:gap-2 items-center cursor-default select-none text-amber-700 theme-btn"><Zap size={18} className="fill-amber-600 sm:w-5 sm:h-5" /> {activeCreds}</div>
@@ -1643,8 +1793,8 @@ export default function App() {
           <nav className="flex overflow-x-auto hide-scrollbar gap-1 sm:gap-2 mb-6 sm:mb-8 bg-white p-1.5 shadow-sm border border-gray-100 theme-card">
             <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHomeStr}</span></button>
             <button onClick={() => setActiveTab('planning')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'planning' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Calendar size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tPlanStr}</span></button>
-            {!isAdmin && <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHistStr}</span></button>}
-            {!isAdmin && <button onClick={() => setActiveTab('objectives')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'objectives' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><TrendingUp size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Objectifs</span></button>}
+            {!isAdmin && authUser && <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'history' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><History size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHistStr}</span></button>}
+            {!isAdmin && authUser && <button onClick={() => setActiveTab('objectives')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'objectives' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><TrendingUp size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">Objectifs</span></button>}
             
             {isAdmin && (
               <>
@@ -1700,6 +1850,9 @@ export default function App() {
             )}
           </div>
         )}
+        {activeTab === 'mentions' && <LegalPages page="mentions" />}
+        {activeTab === 'cgv' && <LegalPages page="cgv" />}
+        {activeTab === 'confidentialite' && <LegalPages page="confidentialite" />}
 
         {activeTab === 'admin_today' && isAdmin && <AdminTodayTab classes={[...classes, ...pastClasses]} users={devUsers} today={todayDate} bookings={allBookings} />}
         {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
@@ -1708,6 +1861,7 @@ export default function App() {
         {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
         {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData}/>}
         {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
+        {/* --- PIED DE PAGE LÉGAL (FOOTER) --- */}
         {activeTab === 'admin_objectives' && isAdmin && (
   <AdminObjectivesTab 
     users={devUsers} 
@@ -1716,6 +1870,20 @@ export default function App() {
   />
 )}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
+
+        <footer className="w-full max-w-[1500px] mx-auto mt-16 pt-8 pb-4 border-t border-gray-200 flex flex-col items-center gap-4">
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm font-bold text-gray-500">
+          <button onClick={() => { setActiveTab('cgv'); window.scrollTo(0,0); }} className="hover:text-amber-600 transition-colors">Conditions Générales de Vente</button>
+          <button onClick={() => { setActiveTab('confidentialite'); window.scrollTo(0,0); }} className="hover:text-amber-600 transition-colors">Politique de Confidentialité</button>
+          <button onClick={() => { setActiveTab('mentions'); window.scrollTo(0,0); }} className="hover:text-amber-600 transition-colors">Mentions Légales</button>
+          <a href="mailto:verticali.poledance@gmail.com" className="hover:text-indigo-600 transition-colors flex items-center gap-1">
+             <Mail size={16}/> Nous contacter
+          </a>
+        </div>
+        <p className="text-xs text-gray-400">
+          © {new Date().getFullYear()} Vertic'Ali. Tous droits réservés.
+        </p>
+      </footer>
       </div>
 
       {showProfile && effectiveUser && <UserProfileForm user={effectiveUser} onClose={() => setShowProfile(false)}/>}
