@@ -77,11 +77,9 @@ const LegalPages = ({ page }: { page: 'mentions' | 'cgv' | 'confidentialite' }) 
             <p className="text-sm">Vertic'Ali (Entreprise individuelle)<br/>Responsable : Alison BOUTELEUX<br/>Adresse : 18 rue Maurice Domon, 80000 AMIENS<br/>Email : verticali.poledance@gmail.com<br/>Téléphone : 06.21.05.64.14<br/>SIRET : 94819885800029</p>
             <h2 className="text-xl font-bold text-amber-600 mt-6">2. Hébergement</h2>
             <p className="text-sm">Le site est hébergé par Firebase (Google LLC), 1600 Amphitheatre Parkway, Mountain View, California 94043 USA.</p>
-            <h2 className="text-xl font-bold text-amber-600 mt-6">2. Hébergement</h2>
-            <p className="text-sm">Le site est hébergé par Firebase (Google LLC), 1600 Amphitheatre Parkway, Mountain View, California 94043 USA.</p>
             
             <h2 className="text-xl font-bold text-amber-600 mt-6">3. Création du site</h2>
-            <p className="text-sm">Conception et développement web : <strong>Aurélien Parent</strong>.</p>
+            <p className="text-sm">Conception et développement web : <strong>Aurélien Parent</strong>.<br/>Email : parauredevios@gmail.com</p>
           </div>
         )}
 
