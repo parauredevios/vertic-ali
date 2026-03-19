@@ -27,7 +27,7 @@ interface StudioLocation { id: string; name: string; address: string; }
 interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; color?: string; }
 interface CreditPackTemplate { id: string; name: string; price: number; qty: number; validityDays: number; }
 interface GlobalSettings { reminderDays: number; welcomeText?: string; welcomeImageUrl?: string; welcomeTextSize?: number; welcomeImageSize?: number; }
-interface ThemeSettings { cardRadius?: string; btnRadius?: string; fontFamily?: string; fontSize?: string; tabHome?: string; tabPlanning?: string; tabHistory?: string; logoUrl?: string; }
+interface ThemeSettings { cardRadius?: string; btnRadius?: string; fontFamily?: string; fontSize?: string; tabHome?: string; tabPlanning?: string; tabHistory?: string; logoUrl?: string; classCardStyle?: string; }
 
 interface DanceClass {
   id: string; title: string; description?: string; price: string;
@@ -1085,27 +1085,180 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle = 'simple' }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  
   const isFull = info.attendeesCount >= info.maxCapacity;
-  const isProcessing = processingId === info.id; const canBook = userProfile?.hasFilledForm;
+  const isProcessing = processingId === info.id; 
+  const canBook = userProfile?.hasFilledForm;
+  const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'dev-admin';
 
-  const cardStyle = info.color ? { borderColor: info.color, boxShadow: isBooked ? `0 0 0 4px ${info.color}30` : 'none' } : {};
-  const timeStyle = info.color ? { color: info.color, backgroundColor: `${info.color}15` } : {};
-  const btnStyle = info.color ? { backgroundColor: info.color, color: '#fff' } : {};
+  // --- VARIABLES UNIVERSELLES POUR TOUS LES DESIGNS ---
+  const cardColor = info.color || '#f59e0b';
+  const dateStr = info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const timeStr = info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+  const displayPrice = info.price;
+  const mapsLink = `http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(info.locationAddress || info.location)}`;
+  const calLink = generateGoogleCalendarLink(info.title, info.startAt, info.endAt, info.locationAddress || info.location, info.description || '');
+  const hasExternalLink = !!info.externalLink;
+  const fillPercentage = Math.min(100, ((info.attendeesCount || 0) / info.maxCapacity) * 100);
+  const isPast = info.endAt < new Date();
 
-  return (
-    <div style={cardStyle} className={`bg-white p-5 shadow-sm border-2 relative flex flex-col justify-between text-left theme-card ${!info.color && isBooked ? 'border-amber-400 ring-4 ring-amber-50' : !info.color ? 'border-gray-100' : ''}`}>
-      {(userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') && (<div className="absolute top-3 right-3 flex gap-2"><a href={generateGoogleCalendarLink(info.title, info.startAt, info.endAt, info.locationAddress || info.location, info.description || '')} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-blue-500"><CalendarPlus size={18}/></a><button onClick={() => onEditClick(info)} className="text-gray-300 hover:text-amber-500"><Edit2 size={18}/></button><button onClick={() => { if(window.confirm("Supprimer ?")) onDelete(info.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={18}/></button></div>)}
-      <div>
-        <div className="flex justify-between items-start mb-4 pr-16 gap-2"><div><h3 className="font-bold text-xl text-gray-800 leading-tight mb-1">{info.title}</h3><p className="text-sm text-gray-500 capitalize">{info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'})}</p></div></div>
-        <div className="flex flex-col items-start mb-3"><div style={timeStyle} className={`text-xl font-black px-3 py-1.5 theme-btn ${!info.color ? 'text-amber-600 bg-amber-50' : ''}`}>{info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}</div>{info.price && <span className="text-sm font-bold text-gray-500 mt-1 bg-gray-100 px-2 py-0.5 theme-btn">Tarif : {info.price}</span>}</div>
-        <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-1 mb-3 inline-block theme-btn">Prof : {info.instructor}</span>
-        {info.description && <p className="text-sm text-gray-600 mb-4 bg-gray-50 p-3 border theme-card">{info.description}</p>}
-        <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-6 font-medium"><span className={`flex gap-1.5 items-center ${isFull && !isBooked ? 'text-red-500' : ''}`}><User size={16}/> {info.attendeesCount}/{info.maxCapacity}</span><a href={`https://google.com/maps/search/?api=1&query=${encodeURIComponent(info.locationAddress || info.location)}`} target="_blank" rel="noreferrer" className={`flex gap-1.5 items-center underline ${info.color ? '' : 'hover:text-amber-600'}`} style={info.color ? {color: info.color} : {}}><MapPin size={16}/> {info.location}</a></div>
+  // --- LOGIQUE DU BOUTON ---
+  let buttonText = 'Réserver ma place';
+  if (hasExternalLink) buttonText = 'Site partenaire';
+  else if (isPast) buttonText = 'Terminé';
+  else if (isBooked) buttonText = 'Annuler ma réservation';
+  else if (!canBook) buttonText = 'Fiche requise';
+  else if (isFull) buttonText = 'Cours Complet';
+
+  const buttonDisabled = isProcessing || (!hasExternalLink && (isPast || (!canBook && !isBooked) || (isFull && !isBooked)));
+
+  const handleInteraction = () => {
+    if (hasExternalLink) window.open(info.externalLink, '_blank');
+    else if (isBooked) onCancelClick(info.id);
+    else onBookClick(info.id);
+  };
+
+  const buttonStyle: any = hasExternalLink && info.color ? { backgroundColor: info.color, color: '#fff' } : {};
+  const buttonClassBase = "w-full font-bold shadow-md transition-opacity hover:opacity-90 flex justify-center items-center gap-2 theme-btn text-center ";
+  const buttonClass = hasExternalLink ? buttonClassBase + (!info.color ? "bg-green-500 text-white py-3.5" : "py-3.5")
+    : isBooked ? buttonClassBase + "bg-red-50 text-red-600 border border-red-200 !shadow-none py-3.5"
+    : buttonDisabled ? buttonClassBase + "bg-gray-300 text-white !shadow-none cursor-not-allowed py-3.5"
+    : buttonClassBase + (!info.color ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white py-3.5" : "py-3.5 text-white");
+  
+  if (!hasExternalLink && !isBooked && !buttonDisabled && info.color) { buttonStyle.backgroundColor = info.color; }
+
+  // --- BLOCS REUTILISABLES (SANS BUGS DE REACT) ---
+  const adminControlsElements = isAdmin ? (
+    <div className="flex gap-2 relative z-30 bg-white p-1 rounded-lg border border-gray-100 shadow-sm w-fit">
+      <a href={calLink} onClick={e => e.stopPropagation()} target="_blank" rel="noreferrer" className="text-gray-500 hover:text-blue-500 p-1.5 bg-gray-50 hover:bg-blue-50 rounded-md transition-colors"><CalendarPlus size={16}/></a>
+      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEditClick(info); }} className="text-gray-500 hover:text-amber-500 p-1.5 bg-gray-50 hover:bg-amber-50 rounded-md transition-colors"><Edit2 size={16}/></button>
+      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); if(window.confirm("Supprimer ce cours ?")) onDelete(info.id); }} className="text-gray-500 hover:text-red-500 p-1.5 bg-gray-50 hover:bg-red-50 rounded-md transition-colors"><Trash2 size={16}/></button>
+    </div>
+  ) : null;
+
+  const attendeesListElements = (isAdmin && !hasExternalLink) ? (
+    <div className="mt-4 w-full relative z-20">
+      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAttendees(!showAttendees); }} className="w-full flex items-center justify-center gap-2 py-3 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors rounded-xl border border-amber-100">
+        <Users size={16}/> {showAttendees ? 'Masquer la liste' : 'Voir les inscrits'} {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+      </button>
+      {showAttendees && <div onClick={e => e.stopPropagation()} className="mt-2"><AdminClassAttendees classInfo={info} onRefresh={onRefresh} /></div>}
+    </div>
+  ) : null;
+
+  const descToggleElements = info.description ? (
+    <div className="w-full mt-3 relative z-20">
+      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowInfo(!showInfo); }} className="flex items-center gap-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 py-2 px-3 rounded-lg transition-colors border border-gray-200 theme-btn">
+        <Info size={14}/> {showInfo ? 'Masquer la description' : 'Lire la description'}
+      </button>
+      {showInfo && <div onClick={e => e.stopPropagation()} className="mt-2 text-sm text-gray-600 bg-gray-50 p-4 border border-gray-100 rounded-xl shadow-inner leading-relaxed whitespace-pre-wrap">{info.description}</div>}
+    </div>
+  ) : null;
+
+  // --- DESIGN 3 : AGENDA ---
+  if (cardStyle === 'agenda') {
+    return (
+      <div className="bg-white border border-gray-200 p-4 sm:p-5 flex flex-col md:flex-row gap-4 items-start md:items-center hover:shadow-md transition-all relative theme-card" style={{borderLeftColor: cardColor, borderLeftWidth: '6px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
+        
+        {/* Date & Heure */}
+        <div className="flex flex-row md:flex-col gap-3 md:gap-0 items-center md:items-start min-w-[120px] shrink-0 relative z-10">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{dateStr}</span>
+          <span className="text-2xl font-black" style={{color: cardColor}}>{timeStr}</span>
+        </div>
+        
+        {/* Infos Centrales */}
+        <div className="flex-1 w-full min-w-0 relative z-20">
+          <div className="flex justify-between items-start gap-4">
+            <h3 className="font-black text-lg text-gray-800 break-words">{info.title}</h3>
+            <div className="md:hidden shrink-0">{adminControlsElements}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-2 font-medium">
+            <a href={mapsLink} onClick={e => e.stopPropagation()} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-indigo-600 hover:underline bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><MapPin size={12}/> {info.location}</a>
+            {displayPrice && <span className="flex items-center gap-1 font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Wallet size={12}/> {displayPrice}</span>}
+            {!hasExternalLink && <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Users size={12}/> {info.attendeesCount || 0}/{info.maxCapacity}</span>}
+          </div>
+          {descToggleElements}
+          {attendeesListElements}
+        </div>
+
+        {/* Boutons Action */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto shrink-0 mt-2 md:mt-0 relative z-30">
+          <div className="hidden md:block">{adminControlsElements}</div>
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleInteraction(); }} disabled={buttonDisabled} className={`${buttonClass} !py-3 px-6 text-sm`} style={buttonStyle}>
+            {buttonText}
+          </button>
+        </div>
       </div>
-      {info.externalLink ? (<a href={info.externalLink} target="_blank" rel="noreferrer" style={btnStyle} className={`w-full py-3.5 font-bold text-white text-center block shadow-lg transition-colors theme-btn ${!info.color ? 'bg-green-500 hover:bg-green-600 shadow-green-200' : ''}`}>Réserver sur le site partenaire</a>) : isBooked ? (<button onClick={() => onCancelClick(info.id)} disabled={isProcessing} className="w-full py-3.5 font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 theme-btn">Annuler ma réservation</button>) : (<button onClick={() => onBookClick(info.id)} disabled={!canBook || isFull || info.endAt < new Date()} style={(!canBook || isFull || info.endAt < new Date()) ? {} : btnStyle} className={`w-full py-3.5 font-bold text-white theme-btn ${!canBook || isFull || info.endAt < new Date() ? 'bg-gray-300' : !info.color ? 'bg-gradient-to-r from-amber-500 to-amber-600 shadow-md hover:opacity-90 transition-opacity' : 'shadow-md hover:opacity-90 transition-opacity'}`}>{info.endAt < new Date() ? 'Terminé' : !canBook ? 'Fiche requise' : isFull ? 'Cours Complet' : 'Réserver ma place'}</button>)}
-      {(userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') && !info.externalLink && <div className="mt-4"><button onClick={() => setShowAttendees(!showAttendees)} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-amber-700 bg-amber-50 theme-btn"><Users size={16}/> Inscrits {showAttendees ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</button>{showAttendees && <AdminClassAttendees classInfo={info} onRefresh={onRefresh} />}</div>}
+    );
+  }
+
+  // --- DESIGN 2 : MINIMALISTE ---
+  if (cardStyle === 'minimalist') {
+    return (
+      <div className="bg-white p-4 shadow-sm hover:shadow-md transition-all border border-gray-200 flex flex-col relative overflow-hidden theme-card" style={{borderTopColor: cardColor, borderTopWidth: '4px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
+        <div className="flex justify-between items-start mb-3"><div><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{dateStr}</p><h3 className="text-lg font-black text-gray-800 leading-tight mt-0.5">{info.title}</h3></div>{adminControlsElements}</div>
+        <div className="space-y-1.5 mb-4 text-xs font-medium text-gray-600 flex-1"><div className="flex justify-between items-center"><span className="flex items-center gap-2"><Clock size={14}/> {timeStr}</span><span className="font-black text-gray-800">{displayPrice}</span></div><div className="flex justify-between items-center"><a href={mapsLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-indigo-600 hover:underline"><MapPin size={14}/> {info.location}</a></div>{!hasExternalLink && <div className="flex items-center gap-2 pt-1"><Users size={14}/><div className="flex-1 bg-gray-100 h-1.5 rounded-full overflow-hidden"><div className="h-full bg-gray-400 transition-all duration-700" style={{width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : '#9ca3af'}}></div></div><span className="font-bold">{info.attendeesCount || 0}/{info.maxCapacity}</span></div>}</div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={`${buttonClass} text-sm py-2.5 mt-auto`} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 4 : SOLID (FOND TEINTÉ) ---
+  if (cardStyle === 'solid') {
+    return (
+      <div className="p-6 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col relative overflow-hidden theme-card" style={{ backgroundColor: cardColor + '15', border: `1px solid ${cardColor}40`, boxShadow: isBooked ? `0 0 0 4px ${cardColor}50` : 'none' }}>
+        <div className="absolute top-4 right-4">{adminControlsElements}</div>
+        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-900 leading-tight">{info.title}</h3></div></div>
+        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-white text-gray-900 rounded-xl font-black shadow-sm text-sm border theme-btn" style={{ borderColor: cardColor }}>{displayPrice}</span></div>}
+        <div className="space-y-3 mb-6 flex-1">
+          <div className="flex items-center justify-between text-gray-700 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-500 hover:text-gray-900 transition-colors bg-white rounded-full shadow-sm"><CalendarPlus size={16}/></a></div>
+          <div className="flex items-center gap-3 text-gray-700 text-sm"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:underline transition-colors">{info.location || 'Studio'}</a></div>
+          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-700 text-sm pt-2"><div className="p-2 bg-white shadow-sm rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-white/50 rounded-full h-2 mr-2 overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : cardColor }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
+        </div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 5 : OUTLINE (CONTOUR) ---
+  if (cardStyle === 'outline') {
+    return (
+      <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border-2 flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 6px ${cardColor}20` : 'none' }}>
+        <div className="absolute top-4 right-4">{adminControlsElements}</div>
+        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1 text-gray-400">{dateStr}</span><h3 className="text-xl font-black leading-tight" style={{ color: cardColor }}>{info.title}</h3></div></div>
+        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 text-white rounded-xl font-black shadow-sm text-sm theme-btn" style={{ backgroundColor: cardColor }}>{displayPrice}</span></div>}
+        <div className="space-y-3 mb-6 flex-1">
+          <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
+          <div className="flex items-center gap-3 text-gray-600 text-sm"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:text-indigo-600 hover:underline transition-colors">{info.location || 'Studio'}</a></div>
+          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-600 text-sm pt-2"><div className="p-2 bg-gray-100 rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-gray-100 rounded-full h-2 mr-2 overflow-hidden"><div className={`h-full rounded-full transition-all duration-700 ${isFull ? 'bg-red-500' : 'bg-gray-400'}`} style={{ width: `${fillPercentage}%` }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
+        </div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 1 : SIMPLE (PAR DÉFAUT) ---
+  return (
+    <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border border-t-[8px] flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none' }}>
+      <div className="absolute top-4 right-4">{adminControlsElements}</div>
+      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight">{info.title}</h3></div></div>
+      {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-gray-900 text-white rounded-xl font-black shadow-sm text-sm theme-btn">{displayPrice}</span></div>}
+      <div className="space-y-3 mb-6 flex-1">
+        <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl theme-btn" style={{ backgroundColor: `${cardColor}20`, color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
+        <div className="flex items-center gap-3 text-gray-600 text-sm"><div className="p-2 rounded-xl theme-btn" style={{ backgroundColor: `${cardColor}20`, color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:text-indigo-600 hover:underline transition-colors">{info.location || 'Studio'}</a></div>
+        {!hasExternalLink && <div className="flex items-center gap-3 text-gray-600 text-sm pt-2"><div className="p-2 bg-gray-100 rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-gray-100 rounded-full h-2 mr-2 overflow-hidden"><div className={`h-full rounded-full transition-all duration-700 ${isFull ? 'bg-red-500' : 'bg-gray-400'}`} style={{ width: `${fillPercentage}%` }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
+      </div>
+      {descToggleElements}
+      {attendeesListElements}
+      <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
     </div>
   );
 };
@@ -1296,6 +1449,7 @@ const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimR
     tabHome: themeSettings?.tabHome || 'Accueil',
     tabPlanning: themeSettings?.tabPlanning || 'Planning',
     tabHistory: themeSettings?.tabHistory || 'Mon Historique',
+    classCardStyle: themeSettings?.classCardStyle || 'simple',
   });
   const [selectedUser, setSelectedUser] = useState(''); const [popupMessage, setPopupMessage] = useState(''); const [loading, setLoading] = useState(false);
 
@@ -1348,10 +1502,21 @@ const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimR
                   <div className="mt-6 p-6 flex flex-col items-center justify-center rounded-2xl shadow-inner h-32" style={{backgroundColor: '#111827', borderColor: '#374151', borderWidth: '1px'}}>
                      <button className="px-8 py-3 font-bold transition-all duration-300 shadow-lg text-white" style={{backgroundColor: '#f59e0b', borderRadius: settings.btnRadius}}>Bouton d'Aperçu</button>
                   </div>
+                  <div className="md:col-span-2 pt-6 border-t border-gray-700 mt-4">
+                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Design des Cartes de Cours</label>
+                  <select value={settings.classCardStyle} onChange={e=>handleChange('classCardStyle', e.target.value)} className="w-full p-4 rounded-xl text-white outline-none font-bold" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
+                    <option value="simple">Design 1 : Simple (Par défaut)</option>
+                    <option value="minimalist">Design 2 : Minimaliste</option>
+                    <option value="agenda">Design 3 : Agenda Horizontal</option>
+                    <option value="solid">Design 4 : Fond Teinté Intégral</option>
+                    <option value="outline">Design 5 : Contour Épuré</option>
+                  </select>
+                </div>
                 </div>
               </div>
             </div>
           )}
+          
           {activeModule === 'popup' && (
             <div className="space-y-4 animate-in fade-in">
               <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Bell className="text-blue-400"/> Forcer une Pop-up Élève</h4>
@@ -1540,6 +1705,7 @@ export default function App() {
   const [simulatedRole, setSimulatedRole] = useState<string>('');
   const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
   const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -1881,10 +2047,71 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'planning' && (
-          <div>
+{activeTab === 'planning' && (
+          <div className="max-w-3xl mx-auto"> {/* Centré pour être beau sur grand écran et parfait sur mobile */}
             {isAdmin && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
-            {classes.length === 0 ? ( <div className="bg-white p-10 text-center text-gray-400 theme-card">Aucun cours à venir.</div> ) : (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 items-start">{classes.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={effectiveUser} isBooked={c.attendeeIds?.includes(effectiveUser?.id || '')} onRefresh={fetchAllData} />)}</div>)}
+            
+            {/* 📅 LA BANDE CALENDRIER HORIZONTALE */}
+            <div className="flex overflow-x-auto hide-scrollbar gap-3 mb-6 pb-2 sticky top-0 bg-gray-50 z-40 pt-2 shadow-sm border-b border-gray-200 -mx-3 px-3 sm:mx-0 sm:px-0 sm:border-0 sm:shadow-none">
+              
+              {/* Bouton "Tous les cours" */}
+              <button 
+                onClick={() => setSelectedDateFilter(null)}
+                className={`flex flex-col items-center min-w-[75px] p-3 rounded-2xl border-2 transition-all shrink-0 ${!selectedDateFilter ? 'bg-amber-500 border-amber-500 text-white shadow-lg transform scale-105' : 'bg-white border-transparent text-gray-400 hover:bg-gray-100'}`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wider mb-1">Tous</span>
+                <span className="text-2xl font-black">∞</span>
+              </button>
+
+              {/* Génération dynamique (Uniquement les dates avec au moins 1 cours) */}
+              {Array.from(new Set(classes.map(c => new Date(c.startAt).toLocaleDateString('fr-FR'))))
+                .sort((a, b) => {
+                  const [d1, m1, y1] = a.split('/');
+                  const [d2, m2, y2] = b.split('/');
+                  return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+                })
+                .map((dStr, i) => {
+                  const isSelected = selectedDateFilter === dStr;
+                  const [d, m, y] = dStr.split('/');
+                  const dateObj = new Date(`${y}-${m}-${d}`);
+                  const shortDay = dateObj.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
+                  const dayNum = dateObj.getDate();
+                  const shortMonth = dateObj.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '');
+                  
+                  return (
+                    <button 
+                      key={i}
+                      onClick={() => setSelectedDateFilter(dStr)}
+                      className={`flex flex-col items-center justify-center min-w-[75px] p-3 rounded-2xl border-2 transition-all relative shrink-0 ${isSelected ? 'bg-amber-500 border-amber-500 text-white shadow-lg transform scale-105' : 'bg-white border-gray-100 text-gray-600 hover:border-amber-200 shadow-sm'}`}
+                    >
+                      <span className="text-[10px] font-bold uppercase mb-1">{shortDay}</span>
+                      <span className="text-2xl font-black leading-none my-0.5">{dayNum}</span>
+                      <span className="text-[10px] font-bold uppercase mt-1 opacity-80">{shortMonth}</span>
+                      {/* Le petit point indicateur de cours */}
+                      <span className={`absolute top-2 right-2 w-2.5 h-2.5 rounded-full border-2 border-white ${isSelected ? 'bg-white' : 'bg-amber-500'}`}></span>
+                    </button>
+                  );
+              })}
+            </div>
+
+            {/* 🏋️‍♀️ L'AFFICHAGE DES COURS (Filtré) */}
+            {classes.filter(c => !selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter).length === 0 ? (
+               <div className="bg-white p-10 mt-4 rounded-3xl text-center text-gray-400 theme-card shadow-sm border border-gray-100 flex flex-col items-center gap-4">
+                 <div className="p-4 bg-gray-50 rounded-full"><Calendar size={48} className="text-gray-300" /></div>
+                 <div>
+                   <p className="font-bold text-gray-700 text-lg">Aucun cours prévu</p>
+                   <p className="text-sm mt-1">Sélectionnez une autre date ou cliquez sur "Tous".</p>
+                 </div>
+                 <button onClick={() => setSelectedDateFilter(null)} className="mt-4 px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Voir tout le planning</button>
+               </div>
+            ) : (
+               <div className="flex flex-col gap-4">
+                 {classes
+                   .filter(c => !selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter)
+                   .map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={effectiveUser} isBooked={c.attendeeIds?.includes(effectiveUser?.id || '')} onRefresh={fetchAllData} cardStyle={themeSettings?.classCardStyle || 'simple'} />)
+                 }
+               </div>
+            )}
           </div>
         )}
 
