@@ -420,7 +420,22 @@ const AdminBoutiqueTab = () => {
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 text-left theme-card">
       <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><ShoppingBag className="text-amber-500"/> Commandes de Crédits</h3>
-      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (<div className="space-y-4">{purchases.map(p => (<div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border theme-card ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? (<div className="flex items-center gap-2"><button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1 theme-btn"><CheckCircle size={16}/> Valider</button><button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg theme-btn"><Trash2 size={16}/></button></div>) : <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md theme-btn">Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}</span>}</div>))}</div>)}
+      {purchases.length === 0 ? <p className="text-gray-500">Aucune commande.</p> : (<div className="space-y-4">{purchases.map(p => (<div key={p.id} className={`flex justify-between items-center p-4 rounded-xl border theme-card ${p.status === 'PENDING' ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'}`}><div><p className="font-bold text-gray-800">{p.userName} <span className="text-xs font-normal text-gray-500 ml-2">{new Date(p.date).toLocaleString('fr-FR')}</span></p><p className="text-sm text-gray-600">{p.packName} ({p.qty} cr.) - {p.price}€</p></div>{p.status === 'PENDING' ? (<div className="flex items-center gap-2"><button onClick={() => validatePurchase(p)} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg font-bold text-sm flex gap-1 theme-btn"><CheckCircle size={16}/> Valider</button><button onClick={() => handleCancelPurchase(p.id)} className="bg-red-50 hover:bg-red-100 text-red-500 p-1.5 rounded-lg theme-btn"><Trash2 size={16}/></button></div>) : <div className="flex items-center gap-2">
+  <span className="text-xs font-bold text-gray-400 bg-gray-200 px-3 py-1 rounded-md theme-btn">
+    Activé le {new Date(p.paidAt!).toLocaleDateString('fr-FR')}
+  </span>
+  <button 
+    onClick={async () => {
+      // On va chercher l'adresse de l'élève en direct pour la facture
+      const userSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", p.userId)));
+      const studentProfile = userSnap.empty ? null : userSnap.docs[0].data() as UserProfile;
+      generatePackInvoicePDF(p, studentProfile);
+    }} 
+    className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-md theme-btn shadow-sm"
+  >
+    <Download size={14}/> PDF
+  </button>
+</div>}</div>))}</div>)}
     </div>
   );
 };
@@ -754,6 +769,53 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
     setIsAdding(false);
   };
 
+const handlePaymentMethodChange = async (b: any, newMethod: string) => {
+    if (b.paymentMethod === newMethod) return;
+
+    // SCÉNARIO 1 : Passage en CRÉDIT (Décompte automatique)
+    if (newMethod === 'CREDIT') {
+      const student = allUsers.find(u => u.id === b.userId);
+      if (!student || !student.creditPacks) return alert("Impossible de trouver les crédits de cet élève.");
+
+      const now = new Date();
+      // On cherche les packs encore valides
+      const validPacks = student.creditPacks
+        .filter((p: any) => p.remaining > 0 && new Date(p.expiresAt) > now)
+        .sort((a: any, b: any) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime());
+
+      if (validPacks.length === 0) {
+        alert("❌ Opération impossible : L'élève n'a plus de crédits valides !");
+        return;
+      }
+
+      // On retire 1 crédit
+      validPacks[0].remaining -= 1;
+      const nowStr = now.toISOString();
+
+      try {
+        await updateDoc(doc(db, "users", student.id), { creditPacks: student.creditPacks });
+        await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), {
+          paymentMethod: 'CREDIT',
+          paymentStatus: 'PAID',
+          paidAt: nowStr
+        });
+        
+        // Mise à jour de l'écran direct
+        setClassBookings((prev: any[]) => prev.map((book: any) => 
+          book.id === b.id ? { ...book, paymentMethod: 'CREDIT', paymentStatus: 'PAID', paidAt: nowStr } : book
+        ));
+        alert("✅ 1 Crédit a été décompté et le cours est validé !");
+      } catch (e) {
+        alert("Erreur lors de la modification.");
+      }
+    } 
+    // SCÉNARIO 2 : Changement classique (Espèces <-> Wero)
+    else {
+      await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), { paymentMethod: newMethod });
+      setClassBookings((prev: any[]) => prev.map((book: any) => book.id === b.id ? { ...book, paymentMethod: newMethod } : book));
+    }
+  };
+  
   const togglePayment = async (bookingId: string, currentStatus: string, b: any) => {
     if (b.paymentMethod === 'CREDIT') return; 
 
@@ -837,20 +899,15 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
               {b ? (
                 <div className="flex justify-between items-stretch gap-1.5 w-full">
                   <select 
-                    value={b.paymentMethod}
-                    onChange={async (e) => {
-                      const newMethod = e.target.value;
-                      if(newMethod === b.paymentMethod) return;
-                      await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), { paymentMethod: newMethod });
-                      setClassBookings((prev: any[]) => prev.map((book: any) => book.id === b.id ? { ...book, paymentMethod: newMethod } : book));
-                    }}
-                    disabled={b.paymentMethod === 'CREDIT'}
-                    className={`flex-1 min-w-0 text-[10px] font-bold text-gray-600 uppercase border border-gray-200 rounded p-1.5 outline-none bg-white truncate ${b.paymentMethod === 'CREDIT' ? 'opacity-50' : 'cursor-pointer hover:border-amber-400'}`}
-                  >
-                    <option value="CASH">Espèces</option>
-                    <option value="WERO_RIB">Wero/Virement</option>
-                    <option value="CREDIT">Crédits</option>
-                  </select>
+  value={b.paymentMethod}
+  onChange={(e) => handlePaymentMethodChange(b, e.target.value)}
+  disabled={b.paymentMethod === 'CREDIT'}
+  className={`flex-1 min-w-0 text-[10px] font-bold text-gray-600 uppercase border border-gray-200 rounded p-1.5 outline-none bg-white truncate ${b.paymentMethod === 'CREDIT' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-amber-400'}`}
+>
+  <option value="CASH">Espèces</option>
+  <option value="WERO_RIB">Wero/Virement</option>
+  <option value="CREDIT">Crédits</option>
+</select>
 
                   <button 
                     onClick={() => togglePayment(b.id, b.paymentStatus, b)}
