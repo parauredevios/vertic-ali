@@ -1826,7 +1826,6 @@ export default function App() {
       unsubObjectives();
     }
   }, [simulatedDate]);
-    onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { if (docSnap.exists()) setObjectivesData(docSnap.data()); else setDoc(doc(db, "settings", "objectives"), { bronze: [], silver: [], gold: [] }); });
 
   useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
   useEffect(() => { if (userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [userProfile?.role]);
