@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost, FlaskConical, Target
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost, FlaskConical, Target, Lock
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -24,15 +24,16 @@ export const GOOGLE_DRIVE_URL = "https://script.google.com/macros/s/AKfycbx5GfF0
 
 // --- MODÈLES & TYPES ---
 interface StudioLocation { id: string; name: string; address: string; }
-interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; color?: string; }
+interface ClassLevel { id: string; label: string; }
+interface ClassTemplate { id: string; title: string; locationName: string; price: string; maxCapacity: number; description: string; externalLink?: string; color?: string; level?: string; requiresDiscovery?: boolean; }
 interface CreditPackTemplate { id: string; name: string; price: number; qty: number; validityDays: number; }
-interface GlobalSettings { reminderDays: number; welcomeText?: string; welcomeImageUrl?: string; welcomeTextSize?: number; welcomeImageSize?: number; }
-interface ThemeSettings { cardRadius?: string; btnRadius?: string; fontFamily?: string; fontSize?: string; tabHome?: string; tabPlanning?: string; tabHistory?: string; logoUrl?: string; classCardStyle?: string; }
+interface GlobalSettings { reminderDays: number; welcomeText?: string; welcomeImageUrl?: string; welcomeTextSize?: number; welcomeImageSize?: number; classLevels?: ClassLevel[]; }
+interface ThemeSettings { cardRadius?: string; btnRadius?: string; fontFamily?: string; fontSize?: string; tabHome?: string; tabPlanning?: string; tabHistory?: string; logoUrl?: string; classCardStyle?: string; filterStyle?: string; }
 
 interface DanceClass {
   id: string; title: string; description?: string; price: string;
   startAt: Date; endAt: Date; maxCapacity: number; attendeesCount: number;
-  attendeeIds: string[]; instructor: string; location: string; locationAddress?: string; invoiceArchived?: boolean; externalLink?: string; color?: string;
+  attendeeIds: string[]; instructor: string; location: string; locationAddress?: string; invoiceArchived?: boolean; externalLink?: string; color?: string; level?: string; requiresDiscovery?: boolean;
 }
 
 interface UserProfile {
@@ -40,7 +41,7 @@ interface UserProfile {
   birthDate?: string; street?: string; zipCode?: string; city?: string; phone?: string; emergencyContact?: string; emergencyPhone?: string;
   hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string; credits?: number; pendingPopup?: string;
   creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];currentLevel?: number;
-  validatedObjectives?: string[];
+  validatedObjectives?: string[]; hasCompletedDiscovery?: boolean;
 }
 
 interface BookingInfo {
@@ -227,7 +228,6 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
   renderInvoiceFooter(doc, priceVal); 
 
-  // 🚀 NOUVEAUTÉ : LE NOM AVEC "TEST_" ET L'ENVOI DRIVE
   const prefix = isDemoMode ? "TEST_" : "";
   const fileName = `${prefix}Facture_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`;
 
@@ -301,7 +301,8 @@ const AdminDashboardTab = ({ reminderDays, today }: { reminderDays: number, toda
       const snapB2C = await getDocs(query(collection(db, DB_PREFIX + "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
-        if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number((b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
+        // Ligne à chercher et remplacer dans AdminDashboardTab
+if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number(String(b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
         if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
       });
       const snapBoutique = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases")));
@@ -387,10 +388,10 @@ const AdminTodayTab = ({ classes, users, today, bookings }: { classes: DanceClas
                        <span className="text-[10px] text-gray-400 font-bold uppercase hidden md:block">{student.phone || 'Pas de tél'}</span>
                        {b && (
                           <div className="flex items-center gap-2">
-                             <span className="text-[10px] font-bold text-gray-500 hidden sm:block">{b.paymentMethod}</span>
-                             <button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg font-bold text-xs min-w-[85px] theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                               {b.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
-                             </button>
+                              <span className="text-[10px] font-bold text-gray-500 hidden sm:block">{b.paymentMethod}</span>
+                              <button onClick={() => togglePayment(b.id, b.paymentStatus, b)} disabled={b.paymentMethod === 'CREDIT'} className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg font-bold text-xs min-w-[85px] theme-btn ${b.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {b.paymentStatus === 'PAID' ? <><CheckCircle size={14}/> Payé</> : <><Clock size={14}/> À régler</>}
+                              </button>
                           </div>
                        )}
                     </div>
@@ -545,6 +546,7 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
   const handleManualCredit = async (u: any, isAdding: boolean) => { try { if (isAdding) { const expires = new Date(); expires.setFullYear(expires.getFullYear() + 1); await updateDoc(doc(db, "users", u.id), { creditPacks: [...(u.creditPacks || []), { id: 'manual_' + Date.now(), qty: 1, remaining: 1, expiresAt: expires.toISOString() }] }); } else { if (u.creditPacks && u.creditPacks.length > 0) { const updatedPacks = [...u.creditPacks]; const packToReduce = updatedPacks.find((p: any) => p.remaining > 0); if (packToReduce) { packToReduce.remaining -= 1; await updateDoc(doc(db, "users", u.id), { creditPacks: updatedPacks }); } } } } catch (e) { alert("Erreur."); } };
   const handleSaveMemo = async (u: any) => { setSavingMemo(true); try { await updateDoc(doc(db, "users", u.id), { adminMemo: memoText }); await syncToSheet({ type: 'PROFILE', id: u.id, displayName: u.displayName, email: u.email, adminMemo: memoText }); alert("Mémo enregistré !"); } catch (e) {} setSavingMemo(false); };
   const handleSaveAdminProfileEdit = async (u: any) => { try { await updateDoc(doc(db, "users", u.id), editProfileData); await syncToSheet({ type: 'PROFILE', id: u.id, ...editProfileData }); setIsEditingProfile(false); alert("Profil mis à jour !"); } catch (e) {} };
+  const toggleDiscovery = async (u: any) => { try { await updateDoc(doc(db, "users", u.id), { hasCompletedDiscovery: !u.hasCompletedDiscovery }); setEditProfileData(prev => ({...prev, hasCompletedDiscovery: !prev.hasCompletedDiscovery})); alert("Statut Découverte mis à jour."); } catch(e) { alert("Erreur lors de la mise à jour"); } };
 
   const filteredUsers = users.filter((u: any) => u.role !== 'admin' && u.role !== 'dev-admin' && (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
   const selectedUser = users.find((u: any) => u.id === selectedUserId);
@@ -621,6 +623,18 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
                           <div><p className="text-xs text-gray-400 font-bold uppercase mb-1">Droit à l'image</p><p className={`text-sm font-bold ${selectedUser.imageRights === 'yes' ? 'text-green-600' : 'text-red-500'}`}>{selectedUser.imageRights === 'yes' ? 'OUI' : selectedUser.imageRights === 'no' ? 'NON' : '-'}</p></div>
                           <div className="col-span-2"><p className="text-xs text-gray-400 font-bold uppercase mb-1">Adresse</p><p className="text-sm text-gray-800 font-medium">{selectedUser.street ? `${selectedUser.street}, ${selectedUser.zipCode} ${selectedUser.city}` : '-'}</p></div>
                           <div className="col-span-2 border-t pt-3 mt-1"><p className="text-xs text-red-400 font-bold uppercase mb-1 flex items-center gap-1"><HeartPulse size={12}/> Contact Urgence</p><p className="text-sm text-gray-800 font-medium">{selectedUser.emergencyContact || '-'} ({selectedUser.emergencyPhone || '-'})</p></div>
+                          <div className="col-span-2 border-t pt-3 mt-1">
+                            <p className="text-xs text-indigo-400 font-bold uppercase mb-1 flex items-center gap-1">Pré-requis</p>
+                            <div className="flex items-center justify-between bg-white p-3 rounded-lg border theme-card">
+                              <span className="text-sm font-bold text-gray-700">Cours Découverte validé ?</span>
+                              <button
+                                 onClick={() => toggleDiscovery(selectedUser)}
+                                 className={`px-3 py-1 text-xs font-bold rounded-lg theme-btn transition-colors ${selectedUser.hasCompletedDiscovery ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                              >
+                                {selectedUser.hasCompletedDiscovery ? '✅ OUI' : '❌ NON'}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </>
                     ) : (
@@ -636,6 +650,7 @@ const AdminStudentsTab = ({ users = [], setImpersonatedUserId }: any) => {
                           <div><label className="text-xs font-bold text-red-500">Contact Urgence</label><input value={editProfileData.emergencyContact || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyContact: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
                           <div><label className="text-xs font-bold text-red-500">Tél Urgence</label><input value={editProfileData.emergencyPhone || ''} onChange={e=>setEditProfileData({...editProfileData, emergencyPhone: e.target.value})} className="w-full p-2 border rounded-lg text-sm theme-btn"/></div>
                           <div className="col-span-2"><label className="text-xs font-bold text-gray-500">Droit à l'image</label><select value={editProfileData.imageRights || ''} onChange={e=>setEditProfileData({...editProfileData, imageRights: e.target.value as any})} className="w-full p-2 border rounded-lg text-sm bg-white theme-btn"><option value="">Non renseigné</option><option value="yes">Oui</option><option value="no">Non</option></select></div>
+                          <div className="col-span-2"><label className="text-xs font-bold text-indigo-500 flex items-center gap-1"><CheckCircle size={14}/> Cours Découverte Validé</label><select value={editProfileData.hasCompletedDiscovery ? 'yes' : 'no'} onChange={e=>setEditProfileData({...editProfileData, hasCompletedDiscovery: e.target.value === 'yes'})} className="w-full p-2 border rounded-lg text-sm bg-white theme-btn"><option value="yes">Oui</option><option value="no">Non</option></select></div>
                         </div>
                         <div className="flex gap-2 pt-2"><button onClick={() => setIsEditingProfile(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg text-sm theme-btn">Annuler</button><button onClick={() => handleSaveAdminProfileEdit(selectedUser)} className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-lg text-sm shadow-md theme-btn">Enregistrer</button></div>
                       </div>
@@ -1007,85 +1022,96 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const filteredUsers = users.filter((u:any) => u.role !== 'admin' && u.role !== 'dev-admin' && u.displayName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  const toggleObjective = async (user: any, objId: string) => {
+  const toggleObjective = async (user: any, obj: any) => {
     if (isDemoMode) return alert("🧪 MODE DÉMO : La modification des objectifs des vrais élèves est bloquée pour protéger la base de données.");
+    
     const validated = user.validatedObjectives || [];
-    const newValidated = validated.includes(objId) ? validated.filter((id:string) => id !== objId) : [...validated, objId];
-    await updateDoc(doc(db, "users", user.id), { validatedObjectives: newValidated });
- };
- 
- const changeLevel = async (user: any, delta: number) => {
-    if (isDemoMode) return alert("🧪 MODE DÉMO : Le changement de niveau des vrais élèves est bloqué !");
-    const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
-    await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
- };
+    const isChecked = validated.includes(obj.id);
+    const newValidated = isChecked ? validated.filter((id:string) => id !== obj.id) : [...validated, obj.id];
+    
+    let updates: any = { validatedObjectives: newValidated };
+    
+    // 🛡️ LA SÉCURITÉ MAGIQUE : Si l'admin coche/décoche un objectif contenant "découverte", on force le déblocage du compte !
+    const textLower = obj.text.toLowerCase();
+    if (textLower.includes("découverte") || textLower.includes("decouverte")) {
+       updates.hasCompletedDiscovery = !isChecked; // Passe à 'true' si on coche, 'false' si on décoche
+    }
+
+    await updateDoc(doc(db, "users", user.id), updates);
+  };
+  
+  const changeLevel = async (user: any, delta: number) => {
+     if (isDemoMode) return alert("🧪 MODE DÉMO : Le changement de niveau des vrais élèves est bloqué !");
+     const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
+     await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
+  };
 
   return (
-     <div className="space-y-6 text-left">
-       <div className="flex justify-between items-center mb-6">
-  <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2 text-gray-800">
-    <Target className="text-indigo-600" /> Suivi des Objectifs
-  </h2>
-  <button 
-    onClick={() => setActiveTab('admin_settings')} 
-    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-bold transition-colors flex items-center gap-2 theme-btn"
-  >
-    ⚙️ Modifier les objectifs
-  </button>
-</div>
-       <div className="relative"><Search size={18} className="absolute left-3 top-3.5 text-gray-400"/><input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/></div>
-       <div className="space-y-3">
-         {filteredUsers.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : filteredUsers.map((user:any) => {
-           const lvl = user.currentLevel || 1;
-           const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
-           const validated = user.validatedObjectives || [];
-           const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
-           const tier = getProgressTier(progress);
-           const isExpanded = expandedUserId === user.id;
+    <div className="space-y-6 text-left">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2 text-gray-800">
+          <Target className="text-indigo-600" /> Suivi des Objectifs
+        </h2>
+        <button 
+          onClick={() => setActiveTab('admin_settings')} 
+          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-bold transition-colors flex items-center gap-2 theme-btn"
+        >
+          ⚙️ Modifier les objectifs
+        </button>
+      </div>
+      <div className="relative"><Search size={18} className="absolute left-3 top-3.5 text-gray-400"/><input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/></div>
+      <div className="space-y-3">
+        {filteredUsers.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : filteredUsers.map((user:any) => {
+          const lvl = user.currentLevel || 1;
+          const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
+          const validated = user.validatedObjectives || [];
+          const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
+          const tier = getProgressTier(progress);
+          const isExpanded = expandedUserId === user.id;
 
-           return (
-             <div key={user.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden theme-card transition-all ${isExpanded ? 'ring-2 ring-amber-400' : ''}`}>
-               <div className="p-4 flex flex-col sm:flex-row justify-between items-center gap-4 cursor-pointer hover:bg-gray-50" onClick={() => setExpandedUserId(isExpanded ? null : user.id)}>
-                 <div className="flex items-center gap-3 w-full sm:w-auto">
-                   <div className="w-10 h-10 rounded-full flex items-center justify-center font-black shadow-inner border-2" style={{backgroundColor: tier.color, color: tier.text, borderColor: tier.border}}>{lvl}</div>
-                   <div><p className="font-bold text-gray-800">{user.displayName}</p></div>
-                 </div>
-                 <div className="w-full sm:w-1/3 flex items-center gap-3">
-                    <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden"><div className="h-2.5 rounded-full transition-all duration-500" style={{width: `${progress}%`, backgroundColor: tier.color === '#f3f4f6' ? '#d1d5db' : tier.color}}></div></div>
-                    <span className="text-xs font-black text-gray-600 w-10 text-right">{progress}%</span>
-                 </div>
-               </div>
-               {isExpanded && (
-                 <div className="p-4 bg-gray-50 border-t border-gray-100 animate-in slide-in-from-top-2">
-                   <div className="flex justify-between items-center mb-4">
-                     <h4 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Programme Niveau {lvl}</h4>
-                     <div className="flex gap-2">
-                       <button onClick={(e) => {e.stopPropagation(); changeLevel(user, -1)}} disabled={lvl === 1} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-gray-100 theme-btn">Rétrograder</button>
-                       <button onClick={(e) => {e.stopPropagation(); changeLevel(user, 1)}} disabled={lvl === 3} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 shadow-sm hover:bg-amber-600 theme-btn">Promouvoir ⭐️</button>
-                     </div>
-                   </div>
-                   <div className="space-y-2">
-                     {!currentLevelData || currentLevelData.length === 0 ? <p className="text-xs text-gray-400">Aucun objectif créé pour le moment.</p> : currentLevelData.map((obj:any) => {
-                       const isChecked = validated.includes(obj.id);
-                       return (
-                         <label key={obj.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors theme-btn ${isChecked ? 'bg-green-50 border-green-200 text-green-800 shadow-sm' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
-                           <input type="checkbox" checked={isChecked} onChange={() => toggleObjective(user, obj.id)} className="w-5 h-5 accent-green-600"/>
-                           <span className="text-sm font-bold">{obj.text}</span>
-                         </label>
-                       )
-                     })}
-                   </div>
-                 </div>
-               )}
-             </div>
-           )
-         })}
-       </div>
-     </div>
+          return (
+            <div key={user.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden theme-card transition-all ${isExpanded ? 'ring-2 ring-amber-400' : ''}`}>
+              <div className="p-4 flex flex-col sm:flex-row justify-between items-center gap-4 cursor-pointer hover:bg-gray-50" onClick={() => setExpandedUserId(isExpanded ? null : user.id)}>
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-black shadow-inner border-2" style={{backgroundColor: tier.color, color: tier.text, borderColor: tier.border}}>{lvl}</div>
+                  <div><p className="font-bold text-gray-800">{user.displayName}</p></div>
+                </div>
+                <div className="w-full sm:w-1/3 flex items-center gap-3">
+                   <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden"><div className="h-2.5 rounded-full transition-all duration-500" style={{width: `${progress}%`, backgroundColor: tier.color === '#f3f4f6' ? '#d1d5db' : tier.color}}></div></div>
+                   <span className="text-xs font-black text-gray-600 w-10 text-right">{progress}%</span>
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="p-4 bg-gray-50 border-t border-gray-100 animate-in slide-in-from-top-2">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Programme Niveau {lvl}</h4>
+                    <div className="flex gap-2">
+                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, -1)}} disabled={lvl === 1} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-gray-100 theme-btn">Rétrograder</button>
+                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, 1)}} disabled={lvl === 3} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 shadow-sm hover:bg-amber-600 theme-btn">Promouvoir ⭐️</button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {!currentLevelData || currentLevelData.length === 0 ? <p className="text-xs text-gray-400">Aucun objectif créé pour le moment.</p> : currentLevelData.map((obj:any) => {
+                      const isChecked = validated.includes(obj.id);
+                      return (
+                        <label key={obj.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors theme-btn ${isChecked ? 'bg-green-50 border-green-200 text-green-800 shadow-sm' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                          <input type="checkbox" checked={isChecked} onChange={() => toggleObjective(user, obj)} className="w-5 h-5 accent-green-600"/>
+                          <span className="text-sm font-bold">{obj.text}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle = 'simple' }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle = 'simple', objectivesData }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   
@@ -1094,7 +1120,30 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   const canBook = userProfile?.hasFilledForm;
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'dev-admin';
 
-  // --- VARIABLES UNIVERSELLES POUR TOUS LES DESIGNS ---
+  // --- NOUVELLE LOGIQUE DE RESTRICTION (HYPER ROBUSTE) ---
+  // 1. On rassemble tous les objectifs de tous les niveaux
+  const allObjectives = [
+    ...(objectivesData?.bronze || []),
+    ...(objectivesData?.silver || []),
+    ...(objectivesData?.gold || [])
+  ];
+  
+  // 2. On trouve les IDs de TOUS les objectifs qui contiennent le mot "découverte" (avec ou sans maj/accent)
+  const discoveryObjIds = allObjectives
+    .filter((o: any) => {
+      const text = o.text.toLowerCase();
+      return text.includes("découverte") || text.includes("decouverte");
+    })
+    .map((o: any) => o.id);
+
+  // 3. L'élève est validée si elle possède l'un de ces objectifs, OU si elle avait l'ancienne case cochée manuellement
+  const hasCompletedDiscovery = 
+    userProfile?.hasCompletedDiscovery === true || 
+    discoveryObjIds.some(id => userProfile?.validatedObjectives?.includes(id));
+
+  const isRestrictedForUser = info.requiresDiscovery && !hasCompletedDiscovery && !isAdmin;
+
+  // --- VARIABLES UNIVERSELLES ---
   const cardColor = info.color || '#f59e0b';
   const dateStr = info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
   const timeStr = info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
@@ -1105,15 +1154,15 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   const fillPercentage = Math.min(100, ((info.attendeesCount || 0) / info.maxCapacity) * 100);
   const isPast = info.endAt < new Date();
 
-  // --- LOGIQUE DU BOUTON ---
   let buttonText = 'Réserver ma place';
   if (hasExternalLink) buttonText = 'Site partenaire';
   else if (isPast) buttonText = 'Terminé';
   else if (isBooked) buttonText = 'Annuler ma réservation';
   else if (!canBook) buttonText = 'Fiche requise';
+  else if (isRestrictedForUser) buttonText = '🔒 Objectif Découverte requis';
   else if (isFull) buttonText = 'Cours Complet';
 
-  const buttonDisabled = isProcessing || (!hasExternalLink && (isPast || (!canBook && !isBooked) || (isFull && !isBooked)));
+  const buttonDisabled = isProcessing || (!hasExternalLink && (isPast || (!canBook && !isBooked) || (isRestrictedForUser && !isBooked) || (isFull && !isBooked)));
 
   const handleInteraction = () => {
     if (hasExternalLink) window.open(info.externalLink, '_blank');
@@ -1130,7 +1179,6 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   
   if (!hasExternalLink && !isBooked && !buttonDisabled && info.color) { buttonStyle.backgroundColor = info.color; }
 
-  // --- BLOCS REUTILISABLES (SANS BUGS DE REACT) ---
   const adminControlsElements = isAdmin ? (
     <div className="flex gap-2 relative z-30 bg-white p-1 rounded-lg border border-gray-100 shadow-sm w-fit">
       <a href={calLink} onClick={e => e.stopPropagation()} target="_blank" rel="noreferrer" className="text-gray-500 hover:text-blue-500 p-1.5 bg-gray-50 hover:bg-blue-50 rounded-md transition-colors"><CalendarPlus size={16}/></a>
@@ -1157,99 +1205,11 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
     </div>
   ) : null;
 
-  // --- DESIGN 3 : AGENDA ---
-  if (cardStyle === 'agenda') {
-    return (
-      <div className="bg-white border border-gray-200 p-4 sm:p-5 flex flex-col md:flex-row gap-4 items-start md:items-center hover:shadow-md transition-all relative theme-card" style={{borderLeftColor: cardColor, borderLeftWidth: '6px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
-        
-        {/* Date & Heure */}
-        <div className="flex flex-row md:flex-col gap-3 md:gap-0 items-center md:items-start min-w-[120px] shrink-0 relative z-10">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{dateStr}</span>
-          <span className="text-2xl font-black" style={{color: cardColor}}>{timeStr}</span>
-        </div>
-        
-        {/* Infos Centrales */}
-        <div className="flex-1 w-full min-w-0 relative z-20">
-          <div className="flex justify-between items-start gap-4">
-            <h3 className="font-black text-lg text-gray-800 break-words">{info.title}</h3>
-            <div className="md:hidden shrink-0">{adminControlsElements}</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-2 font-medium">
-            <a href={mapsLink} onClick={e => e.stopPropagation()} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-indigo-600 hover:underline bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><MapPin size={12}/> {info.location}</a>
-            {displayPrice && <span className="flex items-center gap-1 font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Wallet size={12}/> {displayPrice}</span>}
-            {!hasExternalLink && <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Users size={12}/> {info.attendeesCount || 0}/{info.maxCapacity}</span>}
-          </div>
-          {descToggleElements}
-          {attendeesListElements}
-        </div>
-
-        {/* Boutons Action */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto shrink-0 mt-2 md:mt-0 relative z-30">
-          <div className="hidden md:block">{adminControlsElements}</div>
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleInteraction(); }} disabled={buttonDisabled} className={`${buttonClass} !py-3 px-6 text-sm`} style={buttonStyle}>
-            {buttonText}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- DESIGN 2 : MINIMALISTE ---
-  if (cardStyle === 'minimalist') {
-    return (
-      <div className="bg-white p-4 shadow-sm hover:shadow-md transition-all border border-gray-200 flex flex-col relative overflow-hidden theme-card" style={{borderTopColor: cardColor, borderTopWidth: '4px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
-        <div className="flex justify-between items-start mb-3"><div><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{dateStr}</p><h3 className="text-lg font-black text-gray-800 leading-tight mt-0.5">{info.title}</h3></div>{adminControlsElements}</div>
-        <div className="space-y-1.5 mb-4 text-xs font-medium text-gray-600 flex-1"><div className="flex justify-between items-center"><span className="flex items-center gap-2"><Clock size={14}/> {timeStr}</span><span className="font-black text-gray-800">{displayPrice}</span></div><div className="flex justify-between items-center"><a href={mapsLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-indigo-600 hover:underline"><MapPin size={14}/> {info.location}</a></div>{!hasExternalLink && <div className="flex items-center gap-2 pt-1"><Users size={14}/><div className="flex-1 bg-gray-100 h-1.5 rounded-full overflow-hidden"><div className="h-full bg-gray-400 transition-all duration-700" style={{width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : '#9ca3af'}}></div></div><span className="font-bold">{info.attendeesCount || 0}/{info.maxCapacity}</span></div>}</div>
-        {descToggleElements}
-        {attendeesListElements}
-        <button onClick={handleInteraction} disabled={buttonDisabled} className={`${buttonClass} text-sm py-2.5 mt-auto`} style={buttonStyle}>{buttonText}</button>
-      </div>
-    );
-  }
-
-  // --- DESIGN 4 : SOLID (FOND TEINTÉ) ---
-  if (cardStyle === 'solid') {
-    return (
-      <div className="p-6 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col relative overflow-hidden theme-card" style={{ backgroundColor: cardColor + '15', border: `1px solid ${cardColor}40`, boxShadow: isBooked ? `0 0 0 4px ${cardColor}50` : 'none' }}>
-        <div className="absolute top-4 right-4">{adminControlsElements}</div>
-        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-900 leading-tight">{info.title}</h3></div></div>
-        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-white text-gray-900 rounded-xl font-black shadow-sm text-sm border theme-btn" style={{ borderColor: cardColor }}>{displayPrice}</span></div>}
-        <div className="space-y-3 mb-6 flex-1">
-          <div className="flex items-center justify-between text-gray-700 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-500 hover:text-gray-900 transition-colors bg-white rounded-full shadow-sm"><CalendarPlus size={16}/></a></div>
-          <div className="flex items-center gap-3 text-gray-700 text-sm"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:underline transition-colors">{info.location || 'Studio'}</a></div>
-          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-700 text-sm pt-2"><div className="p-2 bg-white shadow-sm rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-white/50 rounded-full h-2 mr-2 overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : cardColor }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
-        </div>
-        {descToggleElements}
-        {attendeesListElements}
-        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
-      </div>
-    );
-  }
-
-  // --- DESIGN 5 : OUTLINE (CONTOUR) ---
-  if (cardStyle === 'outline') {
-    return (
-      <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border-2 flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 6px ${cardColor}20` : 'none' }}>
-        <div className="absolute top-4 right-4">{adminControlsElements}</div>
-        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1 text-gray-400">{dateStr}</span><h3 className="text-xl font-black leading-tight" style={{ color: cardColor }}>{info.title}</h3></div></div>
-        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 text-white rounded-xl font-black shadow-sm text-sm theme-btn" style={{ backgroundColor: cardColor }}>{displayPrice}</span></div>}
-        <div className="space-y-3 mb-6 flex-1">
-          <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
-          <div className="flex items-center gap-3 text-gray-600 text-sm"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:text-indigo-600 hover:underline transition-colors">{info.location || 'Studio'}</a></div>
-          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-600 text-sm pt-2"><div className="p-2 bg-gray-100 rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-gray-100 rounded-full h-2 mr-2 overflow-hidden"><div className={`h-full rounded-full transition-all duration-700 ${isFull ? 'bg-red-500' : 'bg-gray-400'}`} style={{ width: `${fillPercentage}%` }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
-        </div>
-        {descToggleElements}
-        {attendeesListElements}
-        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
-      </div>
-    );
-  }
-
-  // --- DESIGN 1 : SIMPLE (PAR DÉFAUT) ---
+  // Design Simple (Le plus robuste)
   return (
     <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border border-t-[8px] flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none' }}>
       <div className="absolute top-4 right-4">{adminControlsElements}</div>
-      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight">{info.title}</h3></div></div>
+      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight flex items-center gap-2">{info.title} {isRestrictedForUser && <Lock size={18} className="text-gray-400" title="Découverte requis" />}</h3></div></div>
       {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-gray-900 text-white rounded-xl font-black shadow-sm text-sm theme-btn">{displayPrice}</span></div>}
       <div className="space-y-3 mb-6 flex-1">
         <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl theme-btn" style={{ backgroundColor: `${cardColor}20`, color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
@@ -1263,48 +1223,121 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   );
 };
 
-const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEdit }: { onAdd: () => void, locations: StudioLocation[], templates: ClassTemplate[], editClassData: DanceClass | null, onCancelEdit: () => void }) => {
-  const [isOpen, setIsOpen] = useState(false); const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: '', externalLink: '', color: ''});
-  useEffect(() => { if (editClassData) { setData({ title: editClassData.title, date: formatForInput(editClassData.startAt), desc: editClassData.description || '', cap: editClassData.maxCapacity, loc: editClassData.location, price: editClassData.price || '', externalLink: editClassData.externalLink || '', color: editClassData.color || '' }); setIsOpen(true); } else { if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name})); } }, [editClassData, locations]);
+const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEdit, classLevels = [] }: any) => {
+  const [isOpen, setIsOpen] = useState(false); 
+  const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: '', externalLink: '', color: '#f59e0b', level: '', requiresDiscovery: false});
+  
+  useEffect(() => { 
+    if (editClassData) { 
+      setData({ 
+        title: editClassData.title || '', 
+        date: editClassData.startAt ? formatForInput(editClassData.startAt) : '', 
+        desc: editClassData.description || '', 
+        // 🛡️ SÉCURITÉ ICI : Si la capacité est vide/absente, on force à 12 au lieu de NaN
+        cap: editClassData.maxCapacity || 12, 
+        loc: editClassData.location || '', 
+        price: editClassData.price || '', 
+        externalLink: editClassData.externalLink || '', 
+        color: editClassData.color || '#f59e0b', 
+        level: editClassData.level || '', 
+        requiresDiscovery: editClassData.requiresDiscovery || false 
+      }); 
+      setIsOpen(true); 
+    } else { 
+      if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name})); 
+    } 
+  }, [editClassData, locations]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!data.date || !data.title) return;
-    const locObj = locations.find(l => l.name === data.loc); const payload = { title: data.title, description: data.desc, instructor: "Ali", location: data.loc, locationAddress: locObj ? locObj.address : '', price: data.price, startAt: Timestamp.fromDate(new Date(data.date)), endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), maxCapacity: Number(data.cap), externalLink: data.externalLink, color: data.color };
-    if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); else await addDoc(collection(db, DB_PREFIX + "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
+    const locObj = locations.find((l:any) => l.name === data.loc); 
+    
+    const payload = { 
+      title: data.title || '', 
+      description: data.desc || '', 
+      instructor: "Ali", 
+      location: data.loc || (locations.length > 0 ? locations[0].name : "Studio") || '', 
+      locationAddress: (locObj ? locObj.address : '') || '', 
+      price: String(data.price || ''), 
+      startAt: Timestamp.fromDate(new Date(data.date)), 
+      endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), 
+      maxCapacity: Number(data.cap) || 12, 
+      externalLink: data.externalLink || '', 
+      color: data.color || '#f59e0b', 
+      level: data.level || '', 
+      requiresDiscovery: data.requiresDiscovery || false 
+    };
+
+    if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); 
+    else await addDoc(collection(db, DB_PREFIX + "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
+    
     setIsOpen(false); onCancelEdit(); onAdd();
   };
+
   if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-8 border-2 border-dashed border-amber-300 text-amber-700 py-4 flex justify-center items-center gap-2 font-bold hover:bg-amber-50 theme-card"><Plus/> Créer un nouveau cours</button>;
+  
   return (
     <div className="bg-white p-6 mb-8 border border-amber-100 shadow-sm relative text-left theme-card">
       <h3 className="font-bold text-amber-800 mb-4 text-lg">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
-      {!editClassData && templates.length > 0 && <select className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 font-bold outline-none theme-btn" onChange={(e) => { const t = templates.find(x => x.id === e.target.value); if (t) setData({...data, title: t.title, loc: t.locationName, cap: t.maxCapacity, desc: t.description, price: t.price, externalLink: t.externalLink || '', color: t.color || '' }); }}><option value="">-- Charger un modèle --</option>{templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>}
+      {!editClassData && templates.length > 0 && <select className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 font-bold outline-none theme-btn" onChange={(e) => { const t = templates.find((x:any) => x.id === e.target.value); if (t) setData({...data, title: t.title, loc: t.locationName || '', cap: t.maxCapacity || 12, desc: t.description || '', price: t.price || '', externalLink: t.externalLink || '', color: t.color || '#f59e0b', level: t.level || '', requiresDiscovery: t.requiresDiscovery || false }); }}><option value="">-- Charger un modèle --</option>{templates.map((t:any) => <option key={t.id} value={t.id}>{t.title}</option>)}</select>}
+      
       <form onSubmit={handleSubmit} className="space-y-4">
         <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border theme-btn" placeholder="Titre du cours *"/>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3"><input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border theme-btn"/><select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border bg-white theme-btn">{locations.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</select><input type="text" value={data.price} onChange={e=>setData({...data, price: e.target.value})} className="w-full p-3 border theme-btn" placeholder="Tarif"/><input type="number" value={data.cap} onChange={e=>setData({...data, cap: Number(e.target.value)})} className="w-full p-3 border theme-btn" placeholder="Places"/></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border theme-btn"/>
+          <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border bg-white theme-btn">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
+          <input type="text" value={data.price} onChange={e=>setData({...data, price: e.target.value})} className="w-full p-3 border theme-btn" placeholder="Tarif"/>
+          {/* 🛡️ SÉCURITÉ ICI : Si data.cap n'est pas un nombre correct, on affiche une case vide pour éviter l'erreur visuelle */}
+          <input type="number" value={Number.isNaN(data.cap) ? '' : data.cap} onChange={e=>setData({...data, cap: parseInt(e.target.value) || 12})} className="w-full p-3 border theme-btn" placeholder="Places"/>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-gray-50 p-3 rounded-xl border">
+          <div>
+            <label className="text-xs font-bold text-gray-500 uppercase">Catégorie / Niveau</label>
+            <select value={data.level} onChange={e=>setData({...data, level: e.target.value})} className="w-full p-2 border mt-1 bg-white outline-none theme-btn">
+              <option value="">-- Sans catégorie --</option>
+              {classLevels.map((lvl:any) => <option key={lvl.id} value={lvl.id}>{lvl.label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center">
+            <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-gray-100 w-full rounded-xl mt-4">
+              <input type="checkbox" checked={data.requiresDiscovery} onChange={e=>setData({...data, requiresDiscovery: e.target.checked})} className="w-5 h-5 accent-indigo-600"/>
+              <span className="text-sm font-bold text-gray-700">Restreint : Requiert la "Découverte"</span>
+            </label>
+          </div>
+        </div>
+
         <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border min-h-[100px] theme-btn" placeholder="Description"/>
         <input value={data.externalLink} onChange={e=>setData({...data, externalLink: e.target.value})} className="w-full p-3 border border-green-200 bg-green-50 outline-none theme-btn" placeholder="Lien de réservation externe (Optionnel)"/>
+        
         <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 theme-card">
           <input type="color" value={data.color || '#f59e0b'} onChange={e=>setData({...data, color: e.target.value})} className="w-10 h-10 p-0 border-0 cursor-pointer bg-transparent"/>
           <span className="text-sm font-bold text-gray-700">Couleur de la carte personnalisée</span>
-          {data.color && <button type="button" onClick={()=>setData({...data, color: ''})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Retirer la couleur</button>}
+          {data.color && <button type="button" onClick={()=>setData({...data, color: '#f59e0b'})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Réinitialiser couleur</button>}
         </div>
-        <div className="flex gap-3"><button type="button" onClick={()=>{setIsOpen(false); onCancelEdit();}} className="flex-1 py-3 bg-gray-100 font-bold theme-btn">Annuler</button><button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold theme-btn">Valider</button></div>
+        
+        <div className="flex gap-3">
+          <button type="button" onClick={()=>{setIsOpen(false); onCancelEdit();}} className="flex-1 py-3 bg-gray-100 font-bold theme-btn">Annuler</button>
+          <button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold theme-btn">Valider</button>
+        </div>
       </form>
     </div>
   );
 };
 
-const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData }: any) => {
+const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData, classLevels = [], setClassLevels }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
-  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' });
+  const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '', level: '', requiresDiscovery: false });
   const [remDays, setRemDays] = useState(globalSettings.reminderDays); const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || ''); const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
   const [welcomeTextSize, setWelcomeTextSize] = useState(globalSettings.welcomeTextSize || 18); const [welcomeImageSize, setWelcomeImageSize] = useState(globalSettings.welcomeImageSize || 50);
   const [newPack, setNewPack] = useState({ name: '', price: 0, qty: 1, validityDays: 90 });
   const [newObjInputs, setNewObjInputs] = useState<any>({ bronze: '', silver: '', gold: '' });
+  
+  const [newLevelLabel, setNewLevelLabel] = useState('');
 
   const addLocation = async () => { if (!newLocName) return; let updatedList; if (editingLocId) { updatedList = locations.map((l:any) => l.id === editingLocId ? { ...l, name: newLocName, address: newLocAddress } : l); setEditingLocId(null); } else { updatedList = [...locations, { id: Date.now().toString(), name: newLocName, address: newLocAddress }]; } await setDoc(doc(db, "settings", "general"), { locations: updatedList }, { merge: true }); setNewLocName(''); setNewLocAddress(''); };
   const removeLocation = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { locations: locations.filter((l:any) => l.id !== id) }, { merge: true }); };
-  const addTemplate = async (e: React.FormEvent) => { e.preventDefault(); if (!newTpl.title) return; let updatedList; if (editingTplId) { updatedList = templates.map((t:any) => t.id === editingTplId ? { ...t, title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color } : t); setEditingTplId(null); } else { updatedList = [...templates, { id: Date.now().toString(), title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color }]; } await setDoc(doc(db, "settings", "general"), { templates: updatedList }, { merge: true }); setNewTpl({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '' }); };
+  const addTemplate = async (e: React.FormEvent) => { e.preventDefault(); if (!newTpl.title) return; let updatedList; if (editingTplId) { updatedList = templates.map((t:any) => t.id === editingTplId ? { ...t, title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color, level: newTpl.level, requiresDiscovery: newTpl.requiresDiscovery } : t); setEditingTplId(null); } else { updatedList = [...templates, { id: Date.now().toString(), title: newTpl.title, locationName: newTpl.loc, price: newTpl.price, maxCapacity: Number(newTpl.cap), description: newTpl.desc, externalLink: newTpl.externalLink, color: newTpl.color, level: newTpl.level, requiresDiscovery: newTpl.requiresDiscovery }]; } await setDoc(doc(db, "settings", "general"), { templates: updatedList }, { merge: true }); setNewTpl({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '', level: '', requiresDiscovery: false }); };
   const removeTemplate = async (id: string) => { if(!confirm("Supprimer ?")) return; await setDoc(doc(db, "settings", "general"), { templates: templates.filter((t:any) => t.id !== id) }, { merge: true }); };
   const addPack = async (e: React.FormEvent) => { e.preventDefault(); if(!newPack.name) return; let updatedList; if (editingPackId) { updatedList = creditPacks.map((p:any) => p.id === editingPackId ? { ...p, ...newPack } : p); setEditingPackId(null); } else { updatedList = [...creditPacks, { id: Date.now().toString(), ...newPack }]; } await setDoc(doc(db, "settings", "general"), { creditPacks: updatedList }, { merge: true }); setNewPack({ name: '', price: 0, qty: 1, validityDays: 90 }); };
   const removePack = async (id: string) => { if(!confirm("Supprimer ce pack ?")) return; await setDoc(doc(db, "settings", "general"), { creditPacks: creditPacks.filter((p:any) => p.id !== id) }, { merge: true }); };
@@ -1321,6 +1354,18 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
     if(!window.confirm("Supprimer cet objectif ?")) return;
     const updatedList = objectivesData[level].filter((o:any) => o.id !== id);
     await setDoc(doc(db, "settings", "objectives"), { [level]: updatedList }, { merge: true });
+  };
+
+  const addClassLevel = async () => {
+    if (!newLevelLabel) return;
+    const updatedList = [...classLevels, { id: Date.now().toString(), label: newLevelLabel }];
+    await setDoc(doc(db, "settings", "general"), { classLevels: updatedList }, { merge: true });
+    setNewLevelLabel('');
+  };
+  const removeClassLevel = async (id: string) => {
+    if (!confirm("Supprimer cette catégorie ?")) return;
+    const updatedList = classLevels.filter((l:any) => l.id !== id);
+    await setDoc(doc(db, "settings", "general"), { classLevels: updatedList }, { merge: true });
   };
 
   return (
@@ -1390,7 +1435,6 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
 
       // 3. 🚀 ON ENVOIE À FIREBASE (La vraie magie)
       try {
-        // Remplace DB_PREFIX + "settings" par juste "settings" si tu n'utilises pas de préfixe
         const docRef = doc(db, "settings", "objectives"); 
         await updateDoc(docRef, {
           [lvl.key]: updatedLevel
@@ -1415,6 +1459,25 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
         </div>
       </div>
 
+      {/* --- NOUVELLE SECTION : NIVEAUX DE COURS (FILTRES) --- */}
+      <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card lg:col-span-2">
+        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Target className="text-indigo-500"/> Catégories / Niveaux de cours (Filtres Planning)</h3>
+        <p className="text-sm text-gray-500 mb-4">Ces catégories apparaîtront comme filtres pour les élèves au-dessus du planning, et comme options pour toi lors de la création d'un cours.</p>
+        <div className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 border border-gray-200 theme-card max-w-md">
+          <input value={newLevelLabel} onChange={e=>setNewLevelLabel(e.target.value)} placeholder="Nom du niveau (ex: Niveau 1)" className="p-2 border outline-none theme-btn"/>
+          <button onClick={addClassLevel} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 transition-colors theme-btn">Ajouter la catégorie</button>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {classLevels.map((lvl:any) => (
+            <div key={lvl.id} className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full font-bold text-sm border border-indigo-100">
+              {lvl.label}
+              <button onClick={() => removeClassLevel(lvl.id)} className="text-indigo-400 hover:text-red-500 ml-1"><Trash2 size={14}/></button>
+            </div>
+          ))}
+          {classLevels.length === 0 && <p className="text-sm text-gray-400 italic">Aucune catégorie configurée.</p>}
+        </div>
+      </div>
+
       <div className="bg-white p-6 shadow-sm border border-amber-200 lg:col-span-2 ring-4 ring-amber-50 theme-card"><h3 className="font-bold text-amber-900 mb-4 flex items-center gap-2"><ShoppingBag className="text-amber-500"/> Offres de la Boutique (Crédits)</h3><form onSubmit={addPack} className="flex flex-col md:flex-row gap-2 mb-4"><input value={newPack.name} onChange={e=>setNewPack({...newPack, name: e.target.value})} placeholder="Nom (Ex: Carte 10 cours)" className="flex-[2] p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.qty} onChange={e=>setNewPack({...newPack, qty: Number(e.target.value)})} placeholder="Crédits" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.price} onChange={e=>setNewPack({...newPack, price: Number(e.target.value)})} placeholder="Prix (€)" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newPack.validityDays} onChange={e=>setNewPack({...newPack, validityDays: Number(e.target.value)})} placeholder="Validité (jours)" className="flex-1 p-2 border outline-none focus:border-amber-500 theme-btn"/>{editingPackId && <button type="button" onClick={()=>{setEditingPackId(null); setNewPack({name:'',price:0,qty:1,validityDays:90});}} className="bg-gray-200 text-gray-700 font-bold px-4 py-2 theme-btn">Annuler</button>}<button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 transition-colors theme-btn">{editingPackId ? 'MAJ' : 'Ajouter'}</button></form><div className="grid grid-cols-1 md:grid-cols-2 gap-2">{creditPacks.map((p:any) => (<div key={p.id} className="flex justify-between items-center bg-amber-50 p-3 border border-amber-100 theme-card"><div><p className="font-bold text-amber-900">{p.name}</p><p className="text-xs text-amber-700">{p.qty} crédits • {p.price}€ • Valable {p.validityDays}j</p></div><div className="flex gap-1"><button onClick={() => {setEditingPackId(p.id); setNewPack({name: p.name, price: p.price, qty: p.qty, validityDays: p.validityDays});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removePack(p.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
       <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><MapIcon className="text-indigo-500"/> Gestion des Lieux</h3><div className="flex flex-col gap-2 mb-4 bg-gray-50 p-4 border border-gray-200 theme-card"><input value={newLocName} onChange={e=>setNewLocName(e.target.value)} placeholder="Nom du lieu" className="p-2 border outline-none theme-btn"/><input value={newLocAddress} onChange={e=>setNewLocAddress(e.target.value)} placeholder="Adresse complète" className="p-2 border outline-none theme-btn"/><div className="flex gap-2">{editingLocId && <button onClick={()=>{setEditingLocId(null); setNewLocName(''); setNewLocAddress('');}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 theme-btn">Annuler</button>}<button onClick={addLocation} className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 transition-colors theme-btn">{editingLocId ? 'MAJ' : 'Ajouter'}</button></div></div><div className="space-y-2">{locations.map((l:any) => (<div key={l.id} className="flex justify-between items-center bg-white p-3 border shadow-sm theme-card"><div><p className="font-bold text-sm">{l.name}</p></div><div className="flex gap-1"><button onClick={() => {setEditingLocId(l.id); setNewLocName(l.name); setNewLocAddress(l.address);}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeLocation(l.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
       <div className="bg-white p-6 shadow-sm border border-gray-200 theme-card">
@@ -1423,16 +1486,26 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
           <input value={newTpl.title} onChange={e=>setNewTpl({...newTpl, title: e.target.value})} placeholder="Titre" className="p-2 border outline-none focus:border-amber-500 theme-btn"/>
           <select value={newTpl.loc} onChange={e=>setNewTpl({...newTpl, loc: e.target.value})} className="p-2 border bg-white outline-none focus:border-amber-500 theme-btn">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
           <div className="flex gap-2"><input value={newTpl.price} onChange={e=>setNewTpl({...newTpl, price: e.target.value})} placeholder="Tarif" className="w-1/2 p-2 border outline-none focus:border-amber-500 theme-btn"/><input type="number" value={newTpl.cap} onChange={e=>setNewTpl({...newTpl, cap: Number(e.target.value)})} placeholder="Capacité max" className="w-1/2 p-2 border outline-none focus:border-amber-500 theme-btn"/></div>
-          <textarea value={newTpl.desc} onChange={e=>setNewTpl({...newTpl, desc: e.target.value})} placeholder="Description du cours (Optionnel)" className="p-2 border outline-none focus:border-amber-500 min-h-[80px] theme-btn"/>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+             <select value={newTpl.level} onChange={e=>setNewTpl({...newTpl, level: e.target.value})} className="p-2 border bg-white outline-none theme-btn">
+               <option value="">-- Sans catégorie --</option>
+               {classLevels.map((lvl:any) => <option key={lvl.id} value={lvl.id}>{lvl.label}</option>)}
+             </select>
+             <label className="flex items-center gap-2 p-2 border rounded cursor-pointer bg-white">
+               <input type="checkbox" checked={newTpl.requiresDiscovery} onChange={e=>setNewTpl({...newTpl, requiresDiscovery: e.target.checked})} className="w-4 h-4 accent-indigo-600"/>
+               <span className="text-xs font-bold text-gray-600">Requiert "Découverte"</span>
+             </label>
+          </div>
+          <textarea value={newTpl.desc} onChange={e=>setNewTpl({...newTpl, desc: e.target.value})} placeholder="Description du cours (Optionnel)" className="p-2 border outline-none focus:border-amber-500 min-h-[80px] theme-btn mt-2"/>
           <input value={newTpl.externalLink} onChange={e=>setNewTpl({...newTpl, externalLink: e.target.value})} placeholder="Lien externe (Optionnel)" className="p-2 border border-green-300 bg-green-50 outline-none focus:border-green-500 theme-btn"/>
           <div className="flex items-center gap-3 mt-1 p-2">
             <input type="color" value={newTpl.color || '#f59e0b'} onChange={e=>setNewTpl({...newTpl, color: e.target.value})} className="w-8 h-8 p-0 border-0 rounded cursor-pointer bg-transparent"/>
             <span className="text-sm font-bold text-gray-700">Couleur du modèle</span>
             {newTpl.color && <button type="button" onClick={()=>setNewTpl({...newTpl, color: ''})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Retirer la couleur</button>}
           </div>
-          <div className="flex gap-2 mt-2">{editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:'', color:''});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 transition-colors theme-btn">{editingTplId ? 'Mettre à jour' : 'Créer le modèle'}</button></div>
+          <div className="flex gap-2 mt-2">{editingTplId && <button type="button" onClick={()=>{setEditingTplId(null); setNewTpl({title:'', loc:'', price:'', cap:12, desc:'', externalLink:'', color:'', level:'', requiresDiscovery:false});}} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 transition-colors theme-btn">{editingTplId ? 'Mettre à jour' : 'Créer le modèle'}</button></div>
         </form>
-        <div className="space-y-2">{templates.map((t:any) => (<div key={t.id} className="flex justify-between items-center bg-white p-3 border shadow-sm theme-card"><div><p className="font-bold text-sm flex items-center gap-2">{t.color && <span className="w-3 h-3 rounded-full" style={{backgroundColor: t.color}}></span>}{t.title}</p></div><div className="flex gap-1"><button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description || '', externalLink: t.externalLink || '', color: t.color || ''});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div>
+        <div className="space-y-2">{templates.map((t:any) => (<div key={t.id} className="flex justify-between items-center bg-white p-3 border shadow-sm theme-card"><div><p className="font-bold text-sm flex items-center gap-2">{t.color && <span className="w-3 h-3 rounded-full" style={{backgroundColor: t.color}}></span>}{t.title}</p></div><div className="flex gap-1"><button onClick={() => {setEditingTplId(t.id); setNewTpl({title: t.title, loc: t.locationName, price: t.price, cap: t.maxCapacity, desc: t.description || '', externalLink: t.externalLink || '', color: t.color || '', level: t.level || '', requiresDiscovery: t.requiresDiscovery || false});}} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => removeTemplate(t.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div>
       </div>
     </div>
   );
@@ -1441,15 +1514,10 @@ const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, o
 const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimRole, simDate, setSimDate }: any) => {
   const [activeModule, setActiveModule] = useState('textes');
   const [settings, setSettings] = useState({
-    logoUrl: themeSettings?.logoUrl || '',
-    cardRadius: themeSettings?.cardRadius || '16px',
-    btnRadius: themeSettings?.btnRadius || '12px',
-    fontFamily: themeSettings?.fontFamily || 'ui-sans-serif, system-ui, sans-serif',
-    fontSize: themeSettings?.fontSize || '16px',
-    tabHome: themeSettings?.tabHome || 'Accueil',
-    tabPlanning: themeSettings?.tabPlanning || 'Planning',
-    tabHistory: themeSettings?.tabHistory || 'Mon Historique',
-    classCardStyle: themeSettings?.classCardStyle || 'simple',
+    logoUrl: themeSettings?.logoUrl || '', cardRadius: themeSettings?.cardRadius || '16px', btnRadius: themeSettings?.btnRadius || '12px',
+    fontFamily: themeSettings?.fontFamily || 'ui-sans-serif, system-ui, sans-serif', fontSize: themeSettings?.fontSize || '16px',
+    tabHome: themeSettings?.tabHome || 'Accueil', tabPlanning: themeSettings?.tabPlanning || 'Planning', tabHistory: themeSettings?.tabHistory || 'Mon Historique',
+    classCardStyle: themeSettings?.classCardStyle || 'simple', filterStyle: themeSettings?.filterStyle || 'buttons',
   });
   const [selectedUser, setSelectedUser] = useState(''); const [popupMessage, setPopupMessage] = useState(''); const [loading, setLoading] = useState(false);
 
@@ -1465,110 +1533,45 @@ const DevAdminTab = ({ themeSettings, users, devVis, setDevVis, simRole, setSimR
       </div>
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="w-full lg:w-1/4 flex flex-col gap-2">
-          {[ {id:'textes', icon:<Type size={18}/>, name:'Textes & Logo'}, {id:'formes', icon:<Square size={18}/>, name:'Bordures & Arrondis'}, {id:'popup', icon:<Bell size={18}/>, name:'Pop-up Élève'}, {id:'visibilite', icon:<EyeOff size={18}/>, name:'Visibilité Dev'}, {id:'simulateur', icon:<Ghost size={18}/>, name:'Simulateur'} ].map(mod => (
+          {[ {id:'textes', icon:<Type size={18}/>, name:'Textes & Logo'}, {id:'formes', icon:<Square size={18}/>, name:'Bordures & Formes'}, {id:'popup', icon:<Bell size={18}/>, name:'Pop-up Élève'}, {id:'visibilite', icon:<EyeOff size={18}/>, name:'Visibilité Dev'}, {id:'simulateur', icon:<Ghost size={18}/>, name:'Simulateur'} ].map(mod => (
             <button key={mod.id} onClick={() => setActiveModule(mod.id)} className={`w-full text-left px-4 py-3 rounded-xl font-bold flex items-center gap-3 transition-colors`} style={{backgroundColor: activeModule === mod.id ? '#2563eb' : '#1f2937', color: activeModule === mod.id ? 'white' : '#9ca3af'}}>{mod.icon} {mod.name}</button>
           ))}
         </div>
         <div className="w-full lg:w-3/4 p-6 rounded-2xl min-h-[400px]" style={{backgroundColor: '#1f2937', borderColor: '#374151', borderWidth: '1px'}}>
-          {activeModule === 'textes' && (
-            <div className="space-y-6 animate-in fade-in">
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2">Polices & Textes</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Police d'écriture</label><select value={settings.fontFamily} onChange={e=>handleChange('fontFamily', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="ui-sans-serif, system-ui, sans-serif">Classique (Moderne)</option><option value="'Playfair Display', serif">Élégant (Serif)</option><option value="'Montserrat', sans-serif">Chic (Montserrat)</option><option value="'Nunito', sans-serif">Arrondi (Nunito)</option></select></div>
-                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Taille globale du texte</label><select value={settings.fontSize} onChange={e=>handleChange('fontSize', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="14px">Petit (14px)</option><option value="16px">Normal (16px)</option><option value="18px">Grand (18px)</option></select></div>
-              </div>
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 mt-8">Noms des Onglets Élèves</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 1 (Accueil)</label><input value={settings.tabHome} onChange={e=>handleChange('tabHome', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
-                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 2 (Planning)</label><input value={settings.tabPlanning} onChange={e=>handleChange('tabPlanning', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
-                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 3 (Historique)</label><input value={settings.tabHistory} onChange={e=>handleChange('tabHistory', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
-              </div>
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 mt-8">Identité Visuelle</h4>
-              <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Lien de votre Logo (Remplace l'avatar)</label><input value={settings.logoUrl} onChange={e=>handleChange('logoUrl', e.target.value)} placeholder="Ex: https://i.postimg.cc/mon-logo.png" className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
-            </div>
-          )}
+          {activeModule === 'textes' && ( <div className="space-y-6 animate-in fade-in"><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2">Polices & Textes</h4><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Police d'écriture</label><select value={settings.fontFamily} onChange={e=>handleChange('fontFamily', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="ui-sans-serif, system-ui, sans-serif">Classique (Moderne)</option><option value="'Playfair Display', serif">Élégant (Serif)</option><option value="'Montserrat', sans-serif">Chic (Montserrat)</option><option value="'Nunito', sans-serif">Arrondi (Nunito)</option></select></div><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Taille globale du texte</label><select value={settings.fontSize} onChange={e=>handleChange('fontSize', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="14px">Petit (14px)</option><option value="16px">Normal (16px)</option><option value="18px">Grand (18px)</option></select></div></div><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 mt-8">Noms des Onglets Élèves</h4><div className="grid grid-cols-1 md:grid-cols-3 gap-4"><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 1 (Accueil)</label><input value={settings.tabHome} onChange={e=>handleChange('tabHome', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 2 (Planning)</label><input value={settings.tabPlanning} onChange={e=>handleChange('tabPlanning', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Onglet 3 (Historique)</label><input value={settings.tabHistory} onChange={e=>handleChange('tabHistory', e.target.value)} className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div></div><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 mt-8">Identité Visuelle</h4><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Lien de votre Logo (Remplace l'avatar)</label><input value={settings.logoUrl} onChange={e=>handleChange('logoUrl', e.target.value)} placeholder="Ex: https://i.postimg.cc/mon-logo.png" className="w-full p-3 rounded-xl text-white text-sm outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div></div> )}
           {activeModule === 'formes' && (
             <div className="space-y-6 animate-in fade-in">
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2">Bordures & Arrondis</h4>
+              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2">Bordures & Formes</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
-                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Forme des Cartes</label>
-                  <select value={settings.cardRadius} onChange={e=>handleChange('cardRadius', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="0px">Carré Parfait (0px)</option><option value="8px">Légèrement Arrondi (8px)</option><option value="16px">Arrondi Standard (16px)</option><option value="24px">Très Arrondi (24px)</option><option value="32px">Ovale (32px)</option></select>
-                  <div className="mt-6 p-6 border-2 flex flex-col items-center justify-center text-gray-400 shadow-xl transition-all duration-300 h-32" style={{borderRadius: settings.cardRadius, borderColor: '#374151', backgroundColor: '#111827'}}><span>Aperçu de Carte</span></div>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Forme des Boutons</label>
-                  <select value={settings.btnRadius} onChange={e=>handleChange('btnRadius', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="0px">Carré Parfait (0px)</option><option value="8px">Légèrement Arrondi (8px)</option><option value="12px">Arrondi Standard (12px)</option><option value="99px">Bouton Pilule (Rond 99px)</option></select>
-                  <div className="mt-6 p-6 flex flex-col items-center justify-center rounded-2xl shadow-inner h-32" style={{backgroundColor: '#111827', borderColor: '#374151', borderWidth: '1px'}}>
-                     <button className="px-8 py-3 font-bold transition-all duration-300 shadow-lg text-white" style={{backgroundColor: '#f59e0b', borderRadius: settings.btnRadius}}>Bouton d'Aperçu</button>
+                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Forme des Cartes</label><select value={settings.cardRadius} onChange={e=>handleChange('cardRadius', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="0px">Carré Parfait (0px)</option><option value="8px">Légèrement Arrondi (8px)</option><option value="16px">Arrondi Standard (16px)</option><option value="24px">Très Arrondi (24px)</option><option value="32px">Ovale (32px)</option></select></div>
+                <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Forme des Boutons</label><select value={settings.btnRadius} onChange={e=>handleChange('btnRadius', e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="0px">Carré Parfait (0px)</option><option value="8px">Légèrement Arrondi (8px)</option><option value="12px">Arrondi Standard (12px)</option><option value="99px">Bouton Pilule (Rond 99px)</option></select></div>
+                <div className="md:col-span-2 pt-6 border-t border-gray-700 mt-2 grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Design des Cartes de Cours</label>
+                    <select value={settings.classCardStyle} onChange={e=>handleChange('classCardStyle', e.target.value)} className="w-full p-4 rounded-xl text-white outline-none font-bold" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
+                      <option value="simple">Design 1 : Simple (Par défaut)</option>
+                      <option value="minimalist">Design 2 : Minimaliste</option>
+                      <option value="agenda">Design 3 : Agenda Horizontal</option>
+                      <option value="solid">Design 4 : Fond Teinté Intégral</option>
+                      <option value="outline">Design 5 : Contour Épuré</option>
+                    </select>
                   </div>
-                  <div className="md:col-span-2 pt-6 border-t border-gray-700 mt-4">
-                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Design des Cartes de Cours</label>
-                  <select value={settings.classCardStyle} onChange={e=>handleChange('classCardStyle', e.target.value)} className="w-full p-4 rounded-xl text-white outline-none font-bold" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
-                    <option value="simple">Design 1 : Simple (Par défaut)</option>
-                    <option value="minimalist">Design 2 : Minimaliste</option>
-                    <option value="agenda">Design 3 : Agenda Horizontal</option>
-                    <option value="solid">Design 4 : Fond Teinté Intégral</option>
-                    <option value="outline">Design 5 : Contour Épuré</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Style du Filtre (Niveaux)</label>
+                    <select value={settings.filterStyle} onChange={e=>handleChange('filterStyle', e.target.value)} className="w-full p-4 rounded-xl text-white outline-none font-bold" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
+                      <option value="buttons">Boutons (Par défaut)</option>
+                      <option value="bubbles">Bulles (Arrondies)</option>
+                      <option value="dropdown">Menu Déroulant</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
           )}
-          
-          {activeModule === 'popup' && (
-            <div className="space-y-4 animate-in fade-in">
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Bell className="text-blue-400"/> Forcer une Pop-up Élève</h4>
-              <p className="text-sm text-gray-400 mb-6">Bloque l'écran d'un élève spécifique à sa prochaine connexion.</p>
-              <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Sélectionner l'élève cible</label><select value={selectedUser} onChange={e=>setSelectedUser(e.target.value)} className="w-full p-4 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="">-- Choisir dans la liste --</option>{users.filter((u:any) => u.role !== 'dev-admin').map((u:any) => <option key={u.id} value={u.id}>{u.displayName} ({u.email})</option>)}</select></div>
-              <div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Message d'alerte à afficher</label><textarea value={popupMessage} onChange={e=>setPopupMessage(e.target.value)} placeholder="Ex: N'oublie pas ton certificat médical !" className="w-full p-4 rounded-xl text-white min-h-[120px] outline-none focus:border-blue-500" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div>
-              <button onClick={handleSendPopup} disabled={loading || !selectedUser || !popupMessage} className="text-white font-bold py-4 px-8 rounded-xl disabled:opacity-50 mt-4 transition-colors w-full md:w-auto" style={{backgroundColor: '#2563eb'}}>Programmer l'affichage</button>
-            </div>
-          )}
-          {activeModule === 'visibilite' && (
-            <div className="space-y-6 animate-in fade-in">
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><EyeOff className="text-blue-400"/> Nettoyage de l'interface Dev</h4>
-              <p className="text-sm text-gray-400 mb-6">Ces réglages ne s'appliquent qu'à <b>TOI</b>. Ils permettent de cacher les éléments inutiles pour le développement.</p>
-              <div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700">
-                 <label className="flex items-center justify-between cursor-pointer">
-                   <div><p className="font-bold">Cacher l'En-tête (Header)</p><p className="text-[10px] text-gray-500">Masque le logo, "Bonjour", et les boutons profil/déconnexion.</p></div>
-                   <input type="checkbox" checked={devVis.hideHeader} onChange={e=>setDevVis({...devVis, hideHeader: e.target.checked})} className="w-5 h-5 accent-blue-500" />
-                 </label>
-                 <hr className="border-gray-800"/>
-                 <label className="flex items-center justify-between cursor-pointer">
-                   <div><p className="font-bold">Cacher les Boutons Rapides</p><p className="text-[10px] text-gray-500">Masque Insta, Crédits, Boutique et Cloche.</p></div>
-                   <input type="checkbox" checked={devVis.hideIcons} onChange={e=>setDevVis({...devVis, hideIcons: e.target.checked})} className="w-5 h-5 accent-blue-500" />
-                 </label>
-                 <hr className="border-gray-800"/>
-                 <label className="flex items-center justify-between cursor-pointer">
-                   <div><p className="font-bold">Cacher les Onglets Élèves</p><p className="text-[10px] text-gray-500">Masque Accueil, Planning, Mon Historique.</p></div>
-                   <input type="checkbox" checked={devVis.hideTabs} onChange={e=>setDevVis({...devVis, hideTabs: e.target.checked})} className="w-5 h-5 accent-blue-500" />
-                 </label>
-              </div>
-            </div>
-          )}
-          {activeModule === 'simulateur' && (
-            <div className="space-y-6 animate-in fade-in">
-              <h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Ghost className="text-blue-400"/> Machine à voyager (Tests)</h4>
-              <p className="text-sm text-gray-400 mb-6">Modifie temporairement la réalité de l'application pour tester tes fonctionnalités. <b>Un bouton rouge apparaîtra pour te permettre de quitter ce mode.</b></p>
-              <div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700">
-                <div>
-                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler une date précise</label>
-                  <input type="date" value={simDate} onChange={e=>setSimDate(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} />
-                  <p className="text-[10px] text-gray-500 mt-1">Utile pour voir le bandeau "J-1" ou le clignotement "Cours du jour".</p>
-                </div>
-                <div className="pt-4 border-t border-gray-800">
-                  <label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler un Rôle</label>
-                  <select value={simRole} onChange={e=>setSimRole(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}>
-                    <option value="">Mon vrai rôle (Dev-Admin)</option>
-                    <option value="admin">Administratrice (Cheffe)</option>
-                    <option value="student">Élève Basique</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Reste du DevAdminTab inchangé... */}
+          {activeModule === 'popup' && ( <div className="space-y-4 animate-in fade-in"><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Bell className="text-blue-400"/> Forcer une Pop-up Élève</h4><p className="text-sm text-gray-400 mb-6">Bloque l'écran d'un élève spécifique à sa prochaine connexion.</p><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Sélectionner l'élève cible</label><select value={selectedUser} onChange={e=>setSelectedUser(e.target.value)} className="w-full p-4 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="">-- Choisir dans la liste --</option>{users.filter((u:any) => u.role !== 'dev-admin').map((u:any) => <option key={u.id} value={u.id}>{u.displayName} ({u.email})</option>)}</select></div><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Message d'alerte à afficher</label><textarea value={popupMessage} onChange={e=>setPopupMessage(e.target.value)} placeholder="Ex: N'oublie pas ton certificat médical !" className="w-full p-4 rounded-xl text-white min-h-[120px] outline-none focus:border-blue-500" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /></div><button onClick={handleSendPopup} disabled={loading || !selectedUser || !popupMessage} className="text-white font-bold py-4 px-8 rounded-xl disabled:opacity-50 mt-4 transition-colors w-full md:w-auto" style={{backgroundColor: '#2563eb'}}>Programmer l'affichage</button></div> )}
+          {activeModule === 'visibilite' && ( <div className="space-y-6 animate-in fade-in"><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><EyeOff className="text-blue-400"/> Nettoyage de l'interface Dev</h4><p className="text-sm text-gray-400 mb-6">Ces réglages ne s'appliquent qu'à <b>TOI</b>. Ils permettent de cacher les éléments inutiles pour le développement.</p><div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700"><label className="flex items-center justify-between cursor-pointer"><div><p className="font-bold">Cacher l'En-tête (Header)</p><p className="text-[10px] text-gray-500">Masque le logo, "Bonjour", et les boutons profil/déconnexion.</p></div><input type="checkbox" checked={devVis.hideHeader} onChange={e=>setDevVis({...devVis, hideHeader: e.target.checked})} className="w-5 h-5 accent-blue-500" /></label><hr className="border-gray-800"/><label className="flex items-center justify-between cursor-pointer"><div><p className="font-bold">Cacher les Boutons Rapides</p><p className="text-[10px] text-gray-500">Masque Insta, Crédits, Boutique et Cloche.</p></div><input type="checkbox" checked={devVis.hideIcons} onChange={e=>setDevVis({...devVis, hideIcons: e.target.checked})} className="w-5 h-5 accent-blue-500" /></label><hr className="border-gray-800"/><label className="flex items-center justify-between cursor-pointer"><div><p className="font-bold">Cacher les Onglets Élèves</p><p className="text-[10px] text-gray-500">Masque Accueil, Planning, Mon Historique.</p></div><input type="checkbox" checked={devVis.hideTabs} onChange={e=>setDevVis({...devVis, hideTabs: e.target.checked})} className="w-5 h-5 accent-blue-500" /></label></div></div> )}
+          {activeModule === 'simulateur' && ( <div className="space-y-6 animate-in fade-in"><h4 className="font-bold text-white text-lg border-b border-gray-700 pb-2 flex items-center gap-2"><Ghost className="text-blue-400"/> Machine à voyager (Tests)</h4><p className="text-sm text-gray-400 mb-6">Modifie temporairement la réalité de l'application pour tester tes fonctionnalités. <b>Un bouton rouge apparaîtra pour te permettre de quitter ce mode.</b></p><div className="space-y-4 bg-gray-900 p-6 rounded-xl border border-gray-700"><div><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler une date précise</label><input type="date" value={simDate} onChange={e=>setSimDate(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}} /><p className="text-[10px] text-gray-500 mt-1">Utile pour voir le bandeau "J-1" ou le clignotement "Cours du jour".</p></div><div className="pt-4 border-t border-gray-800"><label className="text-xs text-gray-400 block mb-2 uppercase tracking-wider">Simuler un Rôle</label><select value={simRole} onChange={e=>setSimRole(e.target.value)} className="w-full p-3 rounded-xl text-white outline-none" style={{backgroundColor: '#111827', borderColor: '#4b5563', borderWidth: '1px'}}><option value="">Mon vrai rôle (Dev-Admin)</option><option value="admin">Administratrice (Cheffe)</option><option value="student">Élève Basique</option></select></div></div></div> )}
         </div>
       </div>
     </div>
@@ -1653,10 +1656,6 @@ const UserProfileForm = ({ user, onClose }: any) => {
                 </label>
               </div>
             )}<div className="pt-6 flex gap-3">{!isFirstTime && <button type="button" onClick={onClose} className="flex-1 py-3.5 bg-gray-100 font-bold theme-btn">Annuler</button>}<button type="submit" disabled={saving} className="flex-[2] py-3.5 bg-amber-500 text-white font-bold shadow-lg disabled:opacity-50 theme-btn">{saving ? <Loader2 className="animate-spin mx-auto" size={20}/> : isFirstTime ? 'Terminer mon inscription' : 'Enregistrer'}</button></div></form></div></div>);
-  <label className="flex items-start gap-3 mt-4 p-3 bg-gray-100 border border-gray-200 rounded-xl cursor-pointer">
-              <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500 shrink-0" required={isFirstTime} />
-              <span className="text-sm font-bold text-gray-700">J'accepte les <a href="#/cgv" target="_blank" className="text-amber-600 underline">CGV</a> et la <a href="#/confidentialite" target="_blank" className="text-amber-600 underline">Politique de confidentialité</a>.</span>
-            </label>
 };
 
 const LoginScreen = () => {
@@ -1706,12 +1705,14 @@ export default function App() {
   const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
   const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
   const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string | null>(null);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'accueil' | 'planning' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today' | 'mentions' | 'cgv' | 'confidentialite'>('accueil');
   const [classes, setClasses] = useState<DanceClass[]>([]); const [pastClasses, setPastClasses] = useState<DanceClass[]>([]);
   const [locations, setLocations] = useState<StudioLocation[]>([]); const [templates, setTemplates] = useState<ClassTemplate[]>([]);
+  const [classLevels, setClassLevels] = useState<ClassLevel[]>([]);
   const [creditPacks, setCreditPacks] = useState<CreditPackTemplate[]>([]); const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({ reminderDays: 3 });
   const [themeSettings, setThemeSettings] = useState<ThemeSettings>({});
   const [allPurchases, setAllPurchases] = useState<CreditPurchase[]>([]); const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
@@ -1739,7 +1740,17 @@ export default function App() {
   }, [impersonatedUserId]);
 
   useEffect(() => {
-    if (isAdmin) { const now = todayDate.getTime(); const alert = allBookings.some(b => { if (b.paymentMethod === 'CREDIT') return false; const isPast = new Date(b.date).getTime() < now; if (b.paymentStatus === 'PENDING' && isPast) return true; if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; return false; }) || allPurchases.some(p => p.status === 'PENDING'); setHasInvoiceAlert(alert); }
+    if (isAdmin) { 
+      const now = todayDate.getTime(); 
+      const alert = allBookings.some(b => { 
+        if (b.paymentMethod === 'CREDIT') return false; 
+        const isPast = new Date(b.date).getTime() < now; 
+        if (b.paymentStatus === 'PENDING' && isPast) return true; 
+        if (b.paymentStatus === 'PAID' && !b.invoiceDownloaded) return true; 
+        return false; 
+      }) || allPurchases.some(p => p.status === 'PENDING'); 
+      setHasInvoiceAlert(alert); 
+    }
   }, [allPurchases, allBookings, isAdmin, simulatedDate]);
 
   useEffect(() => {
@@ -1756,7 +1767,7 @@ export default function App() {
                 const bQ = await getDocs(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", oldDoc.id))); bQ.forEach(b => updateDoc(doc(db, "bookings", b.id), { userId: user.uid }));
                 const pQ = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", oldDoc.id))); pQ.forEach(p => updateDoc(doc(db, "credit_purchases", p.id), { userId: user.uid }));
              } else {
-                const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false }; setDoc(userRef, newUser); syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
+                const newUser = { email: user.email, displayName: user.displayName, credits: 0, role: 'student', hasFilledForm: false, hasCompletedDiscovery: false }; setDoc(userRef, newUser); syncToSheet({ type: 'PROFILE', id: user.uid, ...newUser });
              }
           }
         });
@@ -1792,6 +1803,7 @@ export default function App() {
         setLocations(data.locations || []); 
         setTemplates(data.templates || []); 
         setCreditPacks(data.creditPacks || []); 
+        setClassLevels(data.classLevels || []); // NOUVEAU
         setGlobalSettings({ 
           reminderDays: data.reminderDays !== undefined ? data.reminderDays : 3, 
           welcomeText: data.welcomeText || '', 
@@ -1800,8 +1812,7 @@ export default function App() {
           welcomeImageSize: data.welcomeImageSize || 50 
         }); 
       }
-      // 🛡️ ON A SUPPRIMÉ LE 'setDoc' ICI. Si Firebase est lent, on attend, on n'écrase rien !
-      setSettingsLoading(false); // On lève le rideau de chargement
+      setSettingsLoading(false);
     }); 
     
     // 2. Écoute du Thème visuel
@@ -1809,17 +1820,15 @@ export default function App() {
       if (docSnap.exists()) setThemeSettings(docSnap.data() as ThemeSettings); 
     });
 
-    // 3. Écoute des Objectifs (Désormais DANS le useEffect et sécurisé)
+    // 3. Écoute des Objectifs
     const unsubObjectives = onSnapshot(doc(db, "settings", "objectives"), (docSnap) => { 
       if (docSnap.exists()) {
         setObjectivesData(docSnap.data()); 
       } else {
-        // 🛡️ On se contente d'afficher du vide à l'écran, on n'écrase plus Firebase !
         setObjectivesData({ bronze: [], silver: [], gold: [] }); 
       }
     });
 
-    // Nettoyage quand on quitte
     return () => {
       unsubGeneral();
       unsubTheme();
@@ -1830,30 +1839,99 @@ export default function App() {
   useEffect(() => { if (effectiveUser) { const unsubBookings = onSnapshot(query(collection(db, DB_PREFIX + "bookings"), where("userId", "==", effectiveUser.id)), (snap) => { setMyBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as BookingInfo))); }); const unsubPurchases = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases"), where("userId", "==", effectiveUser.id)), (snap) => { setMyPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() } as CreditPurchase))); }); return () => { unsubBookings(); unsubPurchases(); }; } }, [effectiveUser]);
   useEffect(() => { if (userProfile?.role === 'admin' || userProfile?.role === 'dev-admin') { const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile)))); return () => unsubUsers(); } }, [userProfile?.role]);
 
+
+// 🚀 AUTO-VALIDATION DU COURS DÉCOUVERTE
+useEffect(() => {
+  if (!effectiveUser || effectiveUser.role === 'admin' || effectiveUser.role === 'dev-admin') return;
+  
+  // On rassemble tous les niveaux pour chercher l'objectif
+  const allObjectives = [
+    ...(objectivesData?.bronze || []),
+    ...(objectivesData?.silver || []),
+    ...(objectivesData?.gold || [])
+  ];
+  
+  // On cherche l'objectif de découverte (tolérant sur l'orthographe)
+  const discoveryObj = allObjectives.find((o: any) => {
+    const text = o.text.toLowerCase();
+    return text.includes("découverte") || text.includes("decouverte");
+  });
+  
+  if (!discoveryObj) return;
+
+  // Si l'élève a déjà validé l'objectif, on ne fait rien
+  const hasObjective = effectiveUser.validatedObjectives?.includes(discoveryObj.id);
+  if (hasObjective) return; 
+
+  // On vérifie s'il a participé à un cours de découverte (dans le passé)
+  const attendedDiscovery = myBookings.some(b => {
+    if (new Date(b.date) > todayDate) return false; // Le cours doit être passé !
+    
+    const classInfo = [...classes, ...pastClasses].find(c => c.id === b.classId);
+    if (!classInfo) return false;
+
+    const lvlLabel = classLevels.find((l:any) => l.id === classInfo.level)?.label?.toLowerCase() || '';
+    const titleLower = classInfo.title.toLowerCase();
+
+    // On repère un cours découverte par son titre ou sa catégorie (avec ou sans accent)
+    return titleLower.includes('découverte') || titleLower.includes('decouverte') || lvlLabel.includes('découverte') || lvlLabel.includes('decouverte');
+  });
+
+  if (attendedDiscovery) {
+    // Magie ! On valide l'objectif ET l'ancienne variable pour être sûr à 200%
+    const newValidated = [...(effectiveUser.validatedObjectives || []), discoveryObj.id];
+    updateDoc(doc(db, "users", effectiveUser.id), { validatedObjectives: newValidated, hasCompletedDiscovery: true });
+    // On met à jour l'interface instantanément
+    setUserProfile(prev => prev ? { ...prev, validatedObjectives: newValidated, hasCompletedDiscovery: true } : null);
+  }
+}, [myBookings, pastClasses, effectiveUser, objectivesData, classLevels, todayDate]);
+
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
+  
   const initiateBooking = (classId: string) => {
     if (!authUser) {
       alert("👋 Bienvenue ! Veuillez vous créer un compte pour réserver votre cours.");
-      setActiveTab('history'); // On les renvoie vers l'écran de login
+      setActiveTab('history'); 
       return;
     }
     setPaymentModal({ isOpen: true, classId });
   };
+
   const confirmBooking = async (method: PaymentMethod) => {
     const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
     try {
       await runTransaction(db, async (t) => {
         const classRef = doc(db, DB_PREFIX + "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
         if (!classData || !userData) throw "Erreur DB"; if ((classData.attendeeIds || []).includes(effectiveUser.id)) throw "Déjà inscrit !"; if (classData.attendeesCount >= classData.maxCapacity) throw "Complet !";
+        
         let newPacks = userData.creditPacks ? [...userData.creditPacks] : [];
         if (method === 'CREDIT') { const now = todayDate.getTime(); newPacks = newPacks.filter(p => new Date(p.expiresAt).getTime() > now).sort((a,b) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime()); const validPack = newPacks.find(p => p.remaining > 0); if (!validPack) throw "Aucun crédit valide !"; validPack.remaining -= 1; t.update(userRef, { creditPacks: newPacks }); }
+        
         t.update(classRef, { attendeesCount: classData.attendeesCount + 1, attendeeIds: [...(classData.attendeeIds||[]), effectiveUser.id] });
+        
         const paymentStatus = method === 'CREDIT' ? 'PAID' : 'PENDING'; const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR'); const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}); const nowStr = todayDate.toISOString();
         t.set(doc(collection(db, DB_PREFIX + "bookings")), { classId, userId: effectiveUser.id, userName: effectiveUser.displayName, classTitle: classData.title, date: classData.startAt.toDate().toISOString(), dateStr, timeStr, location: classData.location, price: classData.price || '', paymentMethod: method, paymentStatus, updatedAt: nowStr, paidAt: paymentStatus === 'PAID' ? nowStr : null });
+        
         return { classTarget: { id: classId, ...classData, startAt: classData.startAt.toDate(), endAt: classData.endAt.toDate() } as DanceClass, dateStr, timeStr, method, paymentStatus };
-      }).then((d) => { syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: effectiveUser.id, studentName: `${effectiveUser.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); sendNotification(`Nouvelle réservation : ${effectiveUser.displayName} pour ${d.classTarget.title}`, 'BOOKING'); setBookingSuccessData(d.classTarget); fetchAllData(); });
+      }).then((d) => { 
+        syncToSheet({ type: 'BOOKING', classId, classTitle: d.classTarget.title, date: d.dateStr, time: d.timeStr, location: d.classTarget.location, capacity: d.classTarget.maxCapacity, studentId: effectiveUser.id, studentName: `${effectiveUser.displayName} (${d.method})`, paymentStatus: d.paymentStatus, price: d.classTarget.price || '' }); 
+        
+        // --- NOUVEAU FORMAT DE NOTIFICATION EMAIL ---
+        const dateObj = d.classTarget.startAt;
+        // Format: Mercredi 1 Avril
+        const dateFormatee = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+        // Format: 19h30
+        const heureFormatee = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+        
+        const emailMessage = `Nouvelle réservation : ${effectiveUser.displayName} pour ${d.classTarget.title} ${dateFormatee} à ${heureFormatee} (${d.method})`;
+        sendNotification(emailMessage, 'BOOKING'); 
+
+        setBookingSuccessData(d.classTarget); 
+        fetchAllData(); 
+      });
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
+
   const handleCancel = async (classId: string) => {
     if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
     try {
@@ -1865,18 +1943,25 @@ export default function App() {
         t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
       });
       const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
-      if(cTarget) { syncToSheet({ type: 'CANCEL', classId, studentId: effectiveUser.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${effectiveUser.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); sendNotification(`Annulation : ${effectiveUser.displayName} a annulé ${cTarget.title}`, 'CANCEL'); }
+      if(cTarget) { 
+        syncToSheet({ type: 'CANCEL', classId, studentId: effectiveUser.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${effectiveUser.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); 
+        
+        // CORRECTION NOTIFICATION D'ANNULATION ICI
+        const dateObj = cTarget.startAt;
+        const dateFormatee = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const heureFormatee = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+        const emailMessage = `Annulation : ${effectiveUser.displayName} a annulé ${cTarget.title} ${dateFormatee} à ${heureFormatee} (${method})`;
+        sendNotification(emailMessage, 'CANCEL'); 
+      }
       alert("Réservation annulée !"); fetchAllData();
     } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
   };
+
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
   const closeUserPopup = async () => { if (!effectiveUser) return; try { await updateDoc(doc(db, "users", effectiveUser.id), { pendingPopup: '' }); setUserProfile({ ...userProfile, pendingPopup: '' } as UserProfile); } catch (e) { console.error(e); } };
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-amber-600"/></div>;
-  // Autoriser l'accès sans login UNIQUEMENT pour l'accueil et le planning
-  if (!authUser && activeTab !== 'accueil' && activeTab !== 'planning') {
-    return <LoginScreen />;
-  }
+  if (!authUser && activeTab !== 'accueil' && activeTab !== 'planning') { return <LoginScreen />; }
   if (settingsLoading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
       <Loader2 className="animate-spin text-amber-500 mb-4" size={48} />
@@ -1887,11 +1972,8 @@ export default function App() {
   const activeCreds = effectiveUser ? getActiveCredits(effectiveUser) : 0; 
   const unreadNotifs = notifications.filter(n => !n.read).length;
   const hasClassToday = classes.some(c => new Date(c.startAt).toLocaleDateString('fr-FR') === todayDate.toLocaleDateString('fr-FR'));
-
-  // On vérifie les paiements en attente (hors espèces)
   const hasPendingPayments = myBookings.some(b => b.paymentStatus === 'PENDING' && b.paymentMethod !== 'CASH') || myPurchases.some(p => p.status === 'PENDING');
 
-  // Calcul des données pour la barre de progression Élève
   const studentLevel = effectiveUser?.currentLevel || 1;
   const studentObjLevelData = studentLevel === 1 ? objectivesData.bronze : studentLevel === 2 ? objectivesData.silver : objectivesData.gold;
   const studentValidated = effectiveUser?.validatedObjectives || [];
@@ -2046,10 +2128,44 @@ export default function App() {
           </div>
         )}
 
-{activeTab === 'planning' && (
-          <div className="max-w-3xl mx-auto"> {/* Centré pour être beau sur grand écran et parfait sur mobile */}
-            {isAdmin && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} />}
+        {activeTab === 'planning' && (
+          <div className="max-w-3xl mx-auto">
+            {isAdmin && <AdminClassForm onAdd={fetchAllData} locations={locations} templates={templates} editClassData={editingClass} onCancelEdit={() => setEditingClass(null)} classLevels={classLevels} />}
             
+            {/* 🎛️ FILTRES DE NIVEAUX (Lié au paramètre de thème) */}
+            {classLevels.length > 0 && (
+              <div className={`mb-4 ${themeSettings?.filterStyle === 'dropdown' ? '' : 'bg-white p-3 rounded-2xl border border-gray-100 shadow-sm theme-card flex flex-wrap gap-2'}`}>
+                {themeSettings?.filterStyle === 'dropdown' ? (
+                  <select 
+                    value={selectedLevelFilter || ''} 
+                    onChange={e => setSelectedLevelFilter(e.target.value || null)}
+                    className="w-full md:w-auto p-3 bg-white border border-gray-200 rounded-xl shadow-sm outline-none font-bold text-gray-700 theme-btn"
+                  >
+                    <option value="">Tous les niveaux</option>
+                    {classLevels.map((lvl:any) => <option key={lvl.id} value={lvl.id}>{lvl.label}</option>)}
+                  </select>
+                ) : (
+                  <>
+                    <button 
+                      onClick={() => setSelectedLevelFilter(null)} 
+                      className={`px-4 py-2 text-sm font-bold transition-all ${themeSettings?.filterStyle === 'bubbles' ? 'rounded-full' : 'rounded-xl theme-btn'} ${!selectedLevelFilter ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    >
+                      Tous les niveaux
+                    </button>
+                    {classLevels.map((lvl:any) => (
+                      <button 
+                        key={lvl.id} 
+                        onClick={() => setSelectedLevelFilter(lvl.id)} 
+                        className={`px-4 py-2 text-sm font-bold transition-all ${themeSettings?.filterStyle === 'bubbles' ? 'rounded-full' : 'rounded-xl theme-btn'} ${selectedLevelFilter === lvl.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      >
+                        {lvl.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* 📅 LA BANDE CALENDRIER HORIZONTALE */}
             <div className="flex overflow-x-auto hide-scrollbar gap-3 mb-6 pb-2 sticky top-0 bg-gray-50 z-40 pt-2 shadow-sm border-b border-gray-200 -mx-3 px-3 sm:mx-0 sm:px-0 sm:border-0 sm:shadow-none">
               
@@ -2077,6 +2193,10 @@ export default function App() {
                   const dayNum = dateObj.getDate();
                   const shortMonth = dateObj.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '');
                   
+                  // NOUVEAU : On récupère les couleurs des cours de cette date
+                  const dayClasses = classes.filter(c => new Date(c.startAt).toLocaleDateString('fr-FR') === dStr);
+                  const dayColors = Array.from(new Set(dayClasses.map(c => c.color || '#f59e0b')));
+
                   return (
                     <button 
                       key={i}
@@ -2086,27 +2206,33 @@ export default function App() {
                       <span className="text-[10px] font-bold uppercase mb-1">{shortDay}</span>
                       <span className="text-2xl font-black leading-none my-0.5">{dayNum}</span>
                       <span className="text-[10px] font-bold uppercase mt-1 opacity-80">{shortMonth}</span>
-                      {/* Le petit point indicateur de cours */}
-                      <span className={`absolute top-2 right-2 w-2.5 h-2.5 rounded-full border-2 border-white ${isSelected ? 'bg-white' : 'bg-amber-500'}`}></span>
+                      
+                      {/* NOUVEAU : Affichage de plusieurs points de couleur */}
+                      <div className="absolute top-1.5 right-1.5 flex gap-0.5">
+                        {dayColors.slice(0, 3).map((col, idx) => (
+                          <span key={idx} className={`w-2 h-2 rounded-full border border-white shadow-sm ${isSelected ? 'bg-white' : ''}`} style={{ backgroundColor: isSelected ? 'white' : col }}></span>
+                        ))}
+                        {dayColors.length > 3 && <span className={`w-2 h-2 rounded-full border border-white ${isSelected ? 'bg-white' : 'bg-gray-400'}`}></span>}
+                      </div>
                     </button>
                   );
               })}
             </div>
 
             {/* 🏋️‍♀️ L'AFFICHAGE DES COURS (Filtré) */}
-            {classes.filter(c => !selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter).length === 0 ? (
+            {classes.filter(c => (!selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter) && (!selectedLevelFilter || c.level === selectedLevelFilter)).length === 0 ? (
                <div className="bg-white p-10 mt-4 rounded-3xl text-center text-gray-400 theme-card shadow-sm border border-gray-100 flex flex-col items-center gap-4">
                  <div className="p-4 bg-gray-50 rounded-full"><Calendar size={48} className="text-gray-300" /></div>
                  <div>
-                   <p className="font-bold text-gray-700 text-lg">Aucun cours prévu</p>
-                   <p className="text-sm mt-1">Sélectionnez une autre date ou cliquez sur "Tous".</p>
+                   <p className="font-bold text-gray-700 text-lg">Aucun cours trouvé</p>
+                   <p className="text-sm mt-1">Il n'y a pas de cours correspondant à ces filtres.</p>
                  </div>
-                 <button onClick={() => setSelectedDateFilter(null)} className="mt-4 px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Voir tout le planning</button>
+                 <button onClick={() => {setSelectedDateFilter(null); setSelectedLevelFilter(null);}} className="mt-4 px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Retirer les filtres</button>
                </div>
             ) : (
                <div className="flex flex-col gap-4">
                  {classes
-                   .filter(c => !selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter)
+                   .filter(c => (!selectedDateFilter || new Date(c.startAt).toLocaleDateString('fr-FR') === selectedDateFilter) && (!selectedLevelFilter || c.level === selectedLevelFilter))
                    .map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} onEditClick={setEditingClass} onBookClick={initiateBooking} onCancelClick={handleCancel} processingId={processingId} userProfile={effectiveUser} isBooked={c.attendeeIds?.includes(effectiveUser?.id || '')} onRefresh={fetchAllData} cardStyle={themeSettings?.classCardStyle || 'simple'} />)
                  }
                </div>
@@ -2139,19 +2265,19 @@ export default function App() {
         {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
         {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
         {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab users={devUsers} setImpersonatedUserId={setImpersonatedUserId} setActiveTab={setActiveTab} />}
-        {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} />)}</div></div>)}
-        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData}/>}
+        {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} cardStyle={themeSettings?.classCardStyle || 'simple'} />)}</div></div>)}
+        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData} classLevels={classLevels} setClassLevels={setClassLevels}/>}
         {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
-        {/* --- PIED DE PAGE LÉGAL (FOOTER) --- */}
         {activeTab === 'admin_objectives' && isAdmin && (
-  <AdminObjectivesTab 
-    users={devUsers} 
-    objectivesData={objectivesData} 
-    setActiveTab={setActiveTab} 
-  />
-)}
+          <AdminObjectivesTab 
+            users={devUsers} 
+            objectivesData={objectivesData} 
+            setActiveTab={setActiveTab} 
+          />
+        )}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
 
+        {/* --- PIED DE PAGE LÉGAL (FOOTER) --- */}
         <footer className="w-full max-w-[1500px] mx-auto mt-16 pt-8 pb-4 border-t border-gray-200 flex flex-col items-center gap-4">
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm font-bold text-gray-500">
           <button onClick={() => { setActiveTab('cgv'); window.scrollTo(0,0); }} className="hover:text-amber-600 transition-colors">Conditions Générales de Vente</button>
