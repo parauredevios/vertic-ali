@@ -1111,7 +1111,7 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle, objectivesData }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, _cardStyle, objectivesData }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   
