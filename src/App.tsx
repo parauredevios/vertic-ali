@@ -1111,7 +1111,7 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, _cardStyle, objectivesData }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle = 'simple', objectivesData }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   
@@ -1120,15 +1120,13 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   const canBook = userProfile?.hasFilledForm;
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'dev-admin';
 
-  // --- NOUVELLE LOGIQUE DE RESTRICTION (HYPER ROBUSTE) ---
-  // 1. On rassemble tous les objectifs de tous les niveaux
+  // --- LOGIQUE DE RESTRICTION (HYPER ROBUSTE) ---
   const allObjectives = [
     ...(objectivesData?.bronze || []),
     ...(objectivesData?.silver || []),
     ...(objectivesData?.gold || [])
   ];
   
-  // 2. On trouve les IDs de TOUS les objectifs qui contiennent le mot "découverte" (avec ou sans maj/accent)
   const discoveryObjIds = allObjectives
     .filter((o: any) => {
       const text = o.text.toLowerCase();
@@ -1136,14 +1134,13 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
     })
     .map((o: any) => o.id);
 
-  // 3. L'élève est validée si elle possède l'un de ces objectifs, OU si elle avait l'ancienne case cochée manuellement
   const hasCompletedDiscovery = 
     userProfile?.hasCompletedDiscovery === true || 
     discoveryObjIds.some(id => userProfile?.validatedObjectives?.includes(id));
 
   const isRestrictedForUser = info.requiresDiscovery && !hasCompletedDiscovery && !isAdmin;
 
-  // --- VARIABLES UNIVERSELLES ---
+  // --- VARIABLES UNIVERSELLES POUR TOUS LES DESIGNS ---
   const cardColor = info.color || '#f59e0b';
   const dateStr = info.startAt.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
   const timeStr = info.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
@@ -1205,11 +1202,94 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
     </div>
   ) : null;
 
-  // Design Simple (Le plus robuste)
+  // 🛡️ CORRECTION ICÔNE LOCK : Entouré d'un <span> pour le title
+  const lockIcon = isRestrictedForUser ? <span title="Découverte requis"><Lock size={18} className="text-gray-400" /></span> : null;
+
+  // --- DESIGN 3 : AGENDA ---
+  if (cardStyle === 'agenda') {
+    return (
+      <div className="bg-white border border-gray-200 p-4 sm:p-5 flex flex-col md:flex-row gap-4 items-start md:items-center hover:shadow-md transition-all relative theme-card" style={{borderLeftColor: cardColor, borderLeftWidth: '6px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
+        <div className="flex flex-row md:flex-col gap-3 md:gap-0 items-center md:items-start min-w-[120px] shrink-0 relative z-10">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{dateStr}</span>
+          <span className="text-2xl font-black" style={{color: cardColor}}>{timeStr}</span>
+        </div>
+        <div className="flex-1 w-full min-w-0 relative z-20">
+          <div className="flex justify-between items-start gap-4">
+            <h3 className="font-black text-lg text-gray-800 break-words flex items-center gap-2">{info.title} {lockIcon}</h3>
+            <div className="md:hidden shrink-0">{adminControlsElements}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-2 font-medium">
+            <a href={mapsLink} onClick={e => e.stopPropagation()} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-indigo-600 hover:underline bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><MapPin size={12}/> {info.location}</a>
+            {displayPrice && <span className="flex items-center gap-1 font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Wallet size={12}/> {displayPrice}</span>}
+            {!hasExternalLink && <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md border border-gray-100"><Users size={12}/> {info.attendeesCount || 0}/{info.maxCapacity}</span>}
+          </div>
+          {descToggleElements}
+          {attendeesListElements}
+        </div>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto shrink-0 mt-2 md:mt-0 relative z-30">
+          <div className="hidden md:block">{adminControlsElements}</div>
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleInteraction(); }} disabled={buttonDisabled} className={`${buttonClass} !py-3 px-6 text-sm`} style={buttonStyle}>{buttonText}</button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- DESIGN 2 : MINIMALISTE ---
+  if (cardStyle === 'minimalist') {
+    return (
+      <div className="bg-white p-4 shadow-sm hover:shadow-md transition-all border border-gray-200 flex flex-col relative overflow-hidden theme-card" style={{borderTopColor: cardColor, borderTopWidth: '4px', boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none'}}>
+        <div className="flex justify-between items-start mb-3"><div><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{dateStr}</p><h3 className="text-lg font-black text-gray-800 leading-tight mt-0.5 flex items-center gap-2">{info.title} {lockIcon}</h3></div>{adminControlsElements}</div>
+        <div className="space-y-1.5 mb-4 text-xs font-medium text-gray-600 flex-1"><div className="flex justify-between items-center"><span className="flex items-center gap-2"><Clock size={14}/> {timeStr}</span><span className="font-black text-gray-800">{displayPrice}</span></div><div className="flex justify-between items-center"><a href={mapsLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-indigo-600 hover:underline"><MapPin size={14}/> {info.location}</a></div>{!hasExternalLink && <div className="flex items-center gap-2 pt-1"><Users size={14}/><div className="flex-1 bg-gray-100 h-1.5 rounded-full overflow-hidden"><div className="h-full bg-gray-400 transition-all duration-700" style={{width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : '#9ca3af'}}></div></div><span className="font-bold">{info.attendeesCount || 0}/{info.maxCapacity}</span></div>}</div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={`${buttonClass} text-sm py-2.5 mt-auto`} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 4 : SOLID ---
+  if (cardStyle === 'solid') {
+    return (
+      <div className="p-6 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col relative overflow-hidden theme-card" style={{ backgroundColor: cardColor + '15', border: `1px solid ${cardColor}40`, boxShadow: isBooked ? `0 0 0 4px ${cardColor}50` : 'none' }}>
+        <div className="absolute top-4 right-4">{adminControlsElements}</div>
+        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-900 leading-tight flex items-center gap-2">{info.title} {lockIcon}</h3></div></div>
+        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-white text-gray-900 rounded-xl font-black shadow-sm text-sm border theme-btn" style={{ borderColor: cardColor }}>{displayPrice}</span></div>}
+        <div className="space-y-3 mb-6 flex-1">
+          <div className="flex items-center justify-between text-gray-700 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-500 hover:text-gray-900 transition-colors bg-white rounded-full shadow-sm"><CalendarPlus size={16}/></a></div>
+          <div className="flex items-center gap-3 text-gray-700 text-sm"><div className="p-2 rounded-xl bg-white shadow-sm theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:underline transition-colors">{info.location || 'Studio'}</a></div>
+          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-700 text-sm pt-2"><div className="p-2 bg-white shadow-sm rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-white/50 rounded-full h-2 mr-2 overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${fillPercentage}%`, backgroundColor: isFull ? '#ef4444' : cardColor }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
+        </div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 5 : OUTLINE ---
+  if (cardStyle === 'outline') {
+    return (
+      <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border-2 flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 6px ${cardColor}20` : 'none' }}>
+        <div className="absolute top-4 right-4">{adminControlsElements}</div>
+        <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1 text-gray-400">{dateStr}</span><h3 className="text-xl font-black leading-tight flex items-center gap-2" style={{ color: cardColor }}>{info.title} {lockIcon}</h3></div></div>
+        {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 text-white rounded-xl font-black shadow-sm text-sm theme-btn" style={{ backgroundColor: cardColor }}>{displayPrice}</span></div>}
+        <div className="space-y-3 mb-6 flex-1">
+          <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
+          <div className="flex items-center gap-3 text-gray-600 text-sm"><div className="p-2 rounded-xl bg-gray-100 theme-btn" style={{ color: cardColor }}><MapPin size={16} /></div><a href={mapsLink} target="_blank" rel="noreferrer" className="font-medium truncate hover:text-indigo-600 hover:underline transition-colors">{info.location || 'Studio'}</a></div>
+          {!hasExternalLink && <div className="flex items-center gap-3 text-gray-600 text-sm pt-2"><div className="p-2 bg-gray-100 rounded-xl text-gray-500 theme-btn"><Users size={16} /></div><div className="w-full bg-gray-100 rounded-full h-2 mr-2 overflow-hidden"><div className={`h-full rounded-full transition-all duration-700 ${isFull ? 'bg-red-500' : 'bg-gray-400'}`} style={{ width: `${fillPercentage}%` }}></div></div><span className="font-bold whitespace-nowrap">{info.attendeesCount || 0}/{info.maxCapacity || 0}</span></div>}
+        </div>
+        {descToggleElements}
+        {attendeesListElements}
+        <button onClick={handleInteraction} disabled={buttonDisabled} className={buttonClass} style={buttonStyle}>{buttonText}</button>
+      </div>
+    );
+  }
+
+  // --- DESIGN 1 : SIMPLE (PAR DÉFAUT) ---
   return (
     <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border border-t-[8px] flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none' }}>
       <div className="absolute top-4 right-4">{adminControlsElements}</div>
-      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight flex items-center gap-2">{info.title} {isRestrictedForUser && <span title="Découverte requis"><Lock size={18} className="text-gray-400" /></span>}</h3></div></div>
+      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight flex items-center gap-2">{info.title} {lockIcon}</h3></div></div>
       {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-gray-900 text-white rounded-xl font-black shadow-sm text-sm theme-btn">{displayPrice}</span></div>}
       <div className="space-y-3 mb-6 flex-1">
         <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl theme-btn" style={{ backgroundColor: `${cardColor}20`, color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
