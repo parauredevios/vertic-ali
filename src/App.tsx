@@ -1405,6 +1405,83 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
+const AdminPastTab = ({ pastClasses, onDelete, effectiveUser, fetchAllData, themeSettings, objectivesData }: any) => {
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+
+  // Extraire les mois uniques (Format: "YYYY-MM") pour le tri
+  const months = Array.from(new Set(pastClasses.map((c: any) => {
+    const d = new Date(c.startAt);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }))).sort((a: any, b: any) => b.localeCompare(a)); // Tri décroissant (plus récent en premier)
+
+  // Sélectionner automatiquement le mois le plus récent au chargement
+  useEffect(() => {
+    if (!selectedMonth && months.length > 0) {
+      setSelectedMonth(months[0] as string);
+    }
+  }, [months, selectedMonth]);
+
+  // Filtrer les cours
+  const filteredClasses = pastClasses.filter((c: any) => {
+    if (!selectedMonth) return true;
+    const d = new Date(c.startAt);
+    const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return m === selectedMonth;
+  });
+
+  // Formater l'affichage du select (ex: "Avril 2026") - CORRIGÉ ICI ✅
+  const formatMonth = (monthStr: string) => {
+    if (!monthStr) return "Tous les mois";
+    const [y, m] = monthStr.split('-');
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).replace(/^\w/, (c) => c.toUpperCase());
+  };
+
+  return (
+    <div className="space-y-6 text-left max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 theme-card">
+        <h2 className="text-xl sm:text-2xl font-black text-gray-800 flex items-center gap-2">
+          <Archive className="text-amber-500"/> Archives des cours
+        </h2>
+        <select 
+          value={selectedMonth} 
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="p-3 bg-gray-50 border border-gray-200 rounded-xl shadow-sm outline-none font-bold text-gray-700 theme-btn w-full sm:w-auto cursor-pointer focus:border-amber-400 transition-colors"
+        >
+          <option value="">-- Tous les mois --</option>
+          {months.map((m: any) => (
+            <option key={m} value={m}>{formatMonth(m)}</option>
+          ))}
+        </select>
+      </div>
+
+      {filteredClasses.length === 0 ? (
+        <p className="text-gray-500 text-center py-10 bg-white rounded-xl shadow-sm border border-gray-100 theme-card">
+          Aucune archive trouvée pour cette période.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start opacity-90 hover:opacity-100 transition-opacity duration-300">
+          {filteredClasses.map((c: any) => (
+            <ClassCard 
+              key={c.id} 
+              info={c} 
+              onDelete={() => onDelete(c.id)} 
+              processingId={null} 
+              userProfile={effectiveUser} 
+              isBooked={false} 
+              onBookClick={() => {}} 
+              onCancelClick={() => {}} 
+              onRefresh={fetchAllData} 
+              cardStyle={themeSettings?.classCardStyle || 'simple'} 
+              objectivesData={objectivesData} 
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData, classLevels = [] }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '', level: '', requiresDiscovery: false });
@@ -2345,7 +2422,16 @@ useEffect(() => {
         {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
         {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
         {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab users={devUsers} setImpersonatedUserId={setImpersonatedUserId} setActiveTab={setActiveTab} />}
-        {activeTab === 'admin_past' && isAdmin && (<div><h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Archive className="text-gray-600"/> Archives</h2><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 opacity-75 items-start">{pastClasses.map(c => <ClassCard key={c.id} info={c} onDelete={async(id:string)=>{await deleteDoc(doc(db,"classes",id)); fetchAllData()}} processingId={null} userProfile={effectiveUser} isBooked={false} onBookClick={()=>{}} onCancelClick={()=>{}} onRefresh={fetchAllData} cardStyle={themeSettings?.classCardStyle || 'simple'} />)}</div></div>)}
+        {activeTab === 'admin_past' && isAdmin && (
+          <AdminPastTab 
+            pastClasses={pastClasses} 
+            onDelete={async(id: string) => { await deleteDoc(doc(db,"classes",id)); fetchAllData(); }} 
+            effectiveUser={effectiveUser} 
+            fetchAllData={fetchAllData} 
+            themeSettings={themeSettings} 
+            objectivesData={objectivesData} 
+          />
+        )}
         {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData} classLevels={classLevels} setClassLevels={setClassLevels}/>}
         {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
         {activeTab === 'admin_objectives' && isAdmin && (
