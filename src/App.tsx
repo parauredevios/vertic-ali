@@ -1111,7 +1111,7 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   );
 };
 
-const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle = 'simple', objectivesData }: any) => {
+const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, processingId, userProfile, isBooked, onRefresh, cardStyle, objectivesData }: any) => {
   const [showAttendees, setShowAttendees] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   
@@ -1209,7 +1209,7 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   return (
     <div className="bg-white p-6 shadow-sm hover:shadow-xl transition-all duration-300 border border-t-[8px] flex flex-col relative overflow-hidden theme-card" style={{ borderColor: cardColor, boxShadow: isBooked ? `0 0 0 4px ${cardColor}30` : 'none' }}>
       <div className="absolute top-4 right-4">{adminControlsElements}</div>
-      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight flex items-center gap-2">{info.title} {isRestrictedForUser && <Lock size={18} className="text-gray-400" title="Découverte requis" />}</h3></div></div>
+      <div className="flex justify-between items-start mb-4 pr-16 mt-0"><div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: cardColor }}>{dateStr}</span><h3 className="text-xl font-black text-gray-800 leading-tight flex items-center gap-2">{info.title} {isRestrictedForUser && <span title="Découverte requis"><Lock size={18} className="text-gray-400" /></span>}</h3></div></div>
       {displayPrice && <div className="mb-6"><span className="inline-block px-4 py-1.5 bg-gray-900 text-white rounded-xl font-black shadow-sm text-sm theme-btn">{displayPrice}</span></div>}
       <div className="space-y-3 mb-6 flex-1">
         <div className="flex items-center justify-between text-gray-600 text-sm"><div className="flex items-center gap-3"><div className="p-2 rounded-xl theme-btn" style={{ backgroundColor: `${cardColor}20`, color: cardColor }}><Clock size={16} /></div><span className="font-medium">{timeStr}</span></div><a href={calLink} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 transition-colors"><CalendarPlus size={18}/></a></div>
@@ -1325,7 +1325,7 @@ const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEd
   );
 };
 
-const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData, classLevels = [], setClassLevels }: any) => {
+const AdminSettingsTab = ({ locations, templates, globalSettings, creditPacks, objectivesData, setObjectivesData, classLevels = [] }: any) => {
   const [editingLocId, setEditingLocId] = useState<string | null>(null); const [editingTplId, setEditingTplId] = useState<string | null>(null); const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [newLocName, setNewLocName] = useState(''); const [newLocAddress, setNewLocAddress] = useState(''); const [newTpl, setNewTpl] = useState({ title: '', loc: locations[0]?.name || '', price: '', cap: 12, desc: '', externalLink: '', color: '', level: '', requiresDiscovery: false });
   const [remDays, setRemDays] = useState(globalSettings.reminderDays); const [welcomeText, setWelcomeText] = useState(globalSettings.welcomeText || ''); const [welcomeImage, setWelcomeImage] = useState(globalSettings.welcomeImageUrl || '');
