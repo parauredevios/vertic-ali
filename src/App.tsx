@@ -1017,24 +1017,49 @@ const StudentObjectivesTab = ({ userProfile, objectivesData }: any) => {
   );
 };
 
-const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) => {
+const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab, allBookings = [] }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('name'); // Options: 'name', 'progress', 'attendance'
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+
+  // 1. Filtrage de base (recherche texte)
   const filteredUsers = users.filter((u:any) => u.role !== 'admin' && u.role !== 'dev-admin' && u.displayName.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // 2. Calcul des statistiques pour le tri
+  const usersWithStats = filteredUsers.map((user: any) => {
+    const lvl = user.currentLevel || 1;
+    const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
+    const validated = user.validatedObjectives || [];
+    const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
+    
+    // Calcul du nombre de cours réservés
+    const attendanceCount = allBookings.filter((b: any) => b.userId === user.id).length;
+    
+    // Score magique pour trier par niveau PUIS par pourcentage (ex: Niv 2 à 10% sera toujours au-dessus de Niv 1 à 100%)
+    const absoluteProgress = (lvl * 1000) + progress;
+
+    return { ...user, lvl, currentLevelData, validated, progress, attendanceCount, absoluteProgress };
+  });
+
+  // 3. Application du Tri
+  usersWithStats.sort((a: any, b: any) => {
+    if (sortBy === 'name') return a.displayName.localeCompare(b.displayName);
+    if (sortBy === 'progress') return b.absoluteProgress - a.absoluteProgress; // Du plus haut niveau/progression au plus bas
+    if (sortBy === 'attendance') return b.attendanceCount - a.attendanceCount; // De la plus assidue à la moins assidue
+    return 0;
+  });
 
   const toggleObjective = async (user: any, obj: any) => {
     if (isDemoMode) return alert("🧪 MODE DÉMO : La modification des objectifs des vrais élèves est bloquée pour protéger la base de données.");
     
-    const validated = user.validatedObjectives || [];
-    const isChecked = validated.includes(obj.id);
-    const newValidated = isChecked ? validated.filter((id:string) => id !== obj.id) : [...validated, obj.id];
+    const isChecked = user.validated.includes(obj.id);
+    const newValidated = isChecked ? user.validated.filter((id:string) => id !== obj.id) : [...user.validated, obj.id];
     
     let updates: any = { validatedObjectives: newValidated };
     
-    // 🛡️ LA SÉCURITÉ MAGIQUE : Si l'admin coche/décoche un objectif contenant "découverte", on force le déblocage du compte !
     const textLower = obj.text.toLowerCase();
     if (textLower.includes("découverte") || textLower.includes("decouverte")) {
-       updates.hasCompletedDiscovery = !isChecked; // Passe à 'true' si on coche, 'false' si on décoche
+       updates.hasCompletedDiscovery = !isChecked; 
     }
 
     await updateDoc(doc(db, "users", user.id), updates);
@@ -1042,7 +1067,7 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
   
   const changeLevel = async (user: any, delta: number) => {
      if (isDemoMode) return alert("🧪 MODE DÉMO : Le changement de niveau des vrais élèves est bloqué !");
-     const newLevel = Math.max(1, Math.min(3, (user.currentLevel || 1) + delta));
+     const newLevel = Math.max(1, Math.min(3, (user.lvl || 1) + delta));
      await updateDoc(doc(db, "users", user.id), { currentLevel: newLevel });
   };
 
@@ -1059,40 +1084,57 @@ const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab }: any) =
           ⚙️ Modifier les objectifs
         </button>
       </div>
-      <div className="relative"><Search size={18} className="absolute left-3 top-3.5 text-gray-400"/><input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/></div>
+      
+      {/* BARRE DE RECHERCHE ET DE TRI */}
+      <div className="flex flex-col md:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={18} className="absolute left-3 top-3.5 text-gray-400"/>
+          <input type="text" placeholder="Rechercher un élève..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-3 py-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm theme-btn"/>
+        </div>
+        <select 
+          value={sortBy} 
+          onChange={e=>setSortBy(e.target.value)} 
+          className="w-full md:w-auto p-3 bg-white shadow-sm border border-gray-200 rounded-xl outline-none focus:border-amber-500 font-bold text-sm text-gray-700 cursor-pointer theme-btn"
+        >
+          <option value="name">Trier par Nom (A-Z)</option>
+          <option value="progress">Trier par Niveau & Progression</option>
+          <option value="attendance">Trier par Nombre de cours</option>
+        </select>
+      </div>
+
       <div className="space-y-3">
-        {filteredUsers.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : filteredUsers.map((user:any) => {
-          const lvl = user.currentLevel || 1;
-          const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
-          const validated = user.validatedObjectives || [];
-          const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
-          const tier = getProgressTier(progress);
+        {usersWithStats.length === 0 ? <p className="text-gray-400 text-center py-10 bg-white rounded-xl shadow-sm border theme-card">Aucun élève trouvé.</p> : usersWithStats.map((user:any) => {
+          const tier = getProgressTier(user.progress);
           const isExpanded = expandedUserId === user.id;
 
           return (
             <div key={user.id} className={`bg-white border rounded-xl shadow-sm overflow-hidden theme-card transition-all ${isExpanded ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="p-4 flex flex-col sm:flex-row justify-between items-center gap-4 cursor-pointer hover:bg-gray-50" onClick={() => setExpandedUserId(isExpanded ? null : user.id)}>
                 <div className="flex items-center gap-3 w-full sm:w-auto">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-black shadow-inner border-2" style={{backgroundColor: tier.color, color: tier.text, borderColor: tier.border}}>{lvl}</div>
-                  <div><p className="font-bold text-gray-800">{user.displayName}</p></div>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-black shadow-inner border-2 shrink-0" style={{backgroundColor: tier.color, color: tier.text, borderColor: tier.border}}>{user.lvl}</div>
+                  <div>
+                    <p className="font-bold text-gray-800 leading-tight">{user.displayName}</p>
+                    {/* Le petit compteur de présence super utile */}
+                    <p className="text-[10px] text-gray-500 font-bold flex items-center gap-1 mt-0.5 uppercase"><Calendar size={12}/> {user.attendanceCount} cours</p>
+                  </div>
                 </div>
                 <div className="w-full sm:w-1/3 flex items-center gap-3">
-                   <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden"><div className="h-2.5 rounded-full transition-all duration-500" style={{width: `${progress}%`, backgroundColor: tier.color === '#f3f4f6' ? '#d1d5db' : tier.color}}></div></div>
-                   <span className="text-xs font-black text-gray-600 w-10 text-right">{progress}%</span>
+                   <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden"><div className="h-2.5 rounded-full transition-all duration-500" style={{width: `${user.progress}%`, backgroundColor: tier.color === '#f3f4f6' ? '#d1d5db' : tier.color}}></div></div>
+                   <span className="text-xs font-black text-gray-600 w-10 text-right">{user.progress}%</span>
                 </div>
               </div>
               {isExpanded && (
                 <div className="p-4 bg-gray-50 border-t border-gray-100 animate-in slide-in-from-top-2">
                   <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Programme Niveau {lvl}</h4>
+                    <h4 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Programme Niveau {user.lvl}</h4>
                     <div className="flex gap-2">
-                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, -1)}} disabled={lvl === 1} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-gray-100 theme-btn">Rétrograder</button>
-                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, 1)}} disabled={lvl === 3} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 shadow-sm hover:bg-amber-600 theme-btn">Promouvoir ⭐️</button>
+                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, -1)}} disabled={user.lvl === 1} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-gray-100 theme-btn">Rétrograder</button>
+                      <button onClick={(e) => {e.stopPropagation(); changeLevel(user, 1)}} disabled={user.lvl === 3} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-50 shadow-sm hover:bg-amber-600 theme-btn">Promouvoir ⭐️</button>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    {!currentLevelData || currentLevelData.length === 0 ? <p className="text-xs text-gray-400">Aucun objectif créé pour le moment.</p> : currentLevelData.map((obj:any) => {
-                      const isChecked = validated.includes(obj.id);
+                    {!user.currentLevelData || user.currentLevelData.length === 0 ? <p className="text-xs text-gray-400">Aucun objectif créé pour le moment.</p> : user.currentLevelData.map((obj:any) => {
+                      const isChecked = user.validated.includes(obj.id);
                       return (
                         <label key={obj.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors theme-btn ${isChecked ? 'bg-green-50 border-green-200 text-green-800 shadow-sm' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
                           <input type="checkbox" checked={isChecked} onChange={() => toggleObjective(user, obj)} className="w-5 h-5 accent-green-600"/>
@@ -2471,6 +2513,7 @@ useEffect(() => {
             users={devUsers} 
             objectivesData={objectivesData} 
             setActiveTab={setActiveTab} 
+            allBookings={allBookings} 
           />
         )}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
