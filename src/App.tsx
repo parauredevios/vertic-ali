@@ -1017,25 +1017,25 @@ const StudentObjectivesTab = ({ userProfile, objectivesData }: any) => {
   );
 };
 
-const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab, allBookings = [] }: any) => {
+// 1. On ajoute todayDate dans les arguments du composant
+const AdminObjectivesTab = ({ users = [], objectivesData, setActiveTab, allBookings = [], todayDate }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('name'); // Options: 'name', 'progress', 'attendance'
+  const [sortBy, setSortBy] = useState('name'); 
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
-  // 1. Filtrage de base (recherche texte)
   const filteredUsers = users.filter((u:any) => u.role !== 'admin' && u.role !== 'dev-admin' && u.displayName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // 2. Calcul des statistiques pour le tri
   const usersWithStats = filteredUsers.map((user: any) => {
     const lvl = user.currentLevel || 1;
     const currentLevelData = lvl === 1 ? objectivesData.bronze : lvl === 2 ? objectivesData.silver : objectivesData.gold;
     const validated = user.validatedObjectives || [];
     const progress = currentLevelData?.length ? Math.round((currentLevelData.filter((o:any) => validated.includes(o.id)).length / currentLevelData.length) * 100) : 0;
     
-    // Calcul du nombre de cours réservés
-    const attendanceCount = allBookings.filter((b: any) => b.userId === user.id).length;
+    // 🛡️ LOGIQUE CORRIGÉE : On ne compte que si la date du cours est passée
+    const attendanceCount = allBookings.filter((b: any) => {
+        return b.userId === user.id && new Date(b.date) < todayDate;
+    }).length;
     
-    // Score magique pour trier par niveau PUIS par pourcentage (ex: Niv 2 à 10% sera toujours au-dessus de Niv 1 à 100%)
     const absoluteProgress = (lvl * 1000) + progress;
 
     return { ...user, lvl, currentLevelData, validated, progress, attendanceCount, absoluteProgress };
@@ -2513,7 +2513,8 @@ useEffect(() => {
             users={devUsers} 
             objectivesData={objectivesData} 
             setActiveTab={setActiveTab} 
-            allBookings={allBookings} 
+            allBookings={allBookings}
+            todayDate={todayDate} // ⬅️ On ajoute cette ligne
           />
         )}
         {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
