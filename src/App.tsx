@@ -1832,10 +1832,42 @@ const LoginScreen = () => {
     if (!acceptTerms) { setError('Vous devez accepter les conditions générales et la politique de confidentialité.'); setLoading(false); return; }
     
     const domain = email.trim().toLowerCase().split('@')[1];
-    const forbiddenDomains = ['yopmail.com', 'yopmail.fr', 'tempmail.com', '10minutemail.com', 'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'jetable.org'];
-    try { const res = await fetch('https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'); const text = await res.text(); if (text.includes(domain) || forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ou temporaires sont interdites."); setLoading(false); return; } } catch (err) { if (forbiddenDomains.includes(domain)) { setError("⚠️ Les adresses email jetables ne sont pas autorisées."); setLoading(false); return; } }
+    
+    // 🟢 LA LISTE BLANCHE (On accepte ces domaines instantanément)
+    const allowedDomains = ['gmail.com', 'yahoo.fr', 'yahoo.com', 'hotmail.fr', 'hotmail.com', 'outlook.fr', 'outlook.com', 'live.fr', 'live.com', 'icloud.com', 'orange.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'bbox.fr'];
+    
+    if (!allowedDomains.includes(domain)) {
+      // 🔴 LA LISTE NOIRE (On ne vérifie que si ce n'est pas dans la liste blanche)
+      const forbiddenDomains = ['yopmail.com', 'yopmail.fr', 'tempmail.com', '10minutemail.com', 'mailinator.com', 'guerrillamail.com', 'trashmail.com', 'jetable.org'];
+      try { 
+        const res = await fetch('https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'); 
+        const text = await res.text(); 
+        
+        // CORRECTION ICI : On exige une correspondance EXACTE de la ligne (fini les faux positifs sur gmail)
+        const isDisposable = text.split('\n').map(d => d.trim()).includes(domain);
+        
+        if (isDisposable || forbiddenDomains.includes(domain)) { 
+          setError("⚠️ Les adresses email jetables ou temporaires sont interdites."); 
+          setLoading(false); return; 
+        } 
+      } catch (err) { 
+        if (forbiddenDomains.includes(domain)) { 
+          setError("⚠️ Les adresses email jetables ne sont pas autorisées."); 
+          setLoading(false); return; 
+        } 
+      }
+    }
 
-    try { const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password); const fullName = `${firstName.trim()} ${lastName.trim()}`; await updateProfile(userCred.user, { displayName: fullName }); await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName, email: email.trim().toLowerCase(), role: 'student', credits: 0, hasFilledForm: false }, { merge: true }); } catch (err: any) { if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.'); else setError('Erreur lors de la création du compte.'); setLoading(false); }
+    try { 
+      const userCred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password); 
+      const fullName = `${firstName.trim()} ${lastName.trim()}`; 
+      await updateProfile(userCred.user, { displayName: fullName }); 
+      await setDoc(doc(db, "users", userCred.user.uid), { displayName: fullName, email: email.trim().toLowerCase(), role: 'student', credits: 0, hasFilledForm: false, hasCompletedDiscovery: false }, { merge: true }); 
+    } catch (err: any) { 
+      if (err.code === 'auth/email-already-in-use') setError('Cet email est déjà utilisé.'); 
+      else setError('Erreur lors de la création du compte.'); 
+      setLoading(false); 
+    }
   };
   
   const handleReset = async (e: React.FormEvent) => { e.preventDefault(); setError(''); setMsg(''); setLoading(true); try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); setMsg('Lien envoyé par email (Vérifiez vos spams).'); } catch (err) { setError('Erreur. Vérifiez que cette adresse email est correcte.'); } setLoading(false); };
