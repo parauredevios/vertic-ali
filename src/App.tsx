@@ -42,6 +42,7 @@ interface UserProfile {
   hasFilledForm?: boolean; imageRights?: 'yes' | 'no'; adminMemo?: string; credits?: number; pendingPopup?: string;
   creditPacks?: { id: string; qty: number; remaining: number; expiresAt: string; }[];currentLevel?: number;
   validatedObjectives?: string[]; hasCompletedDiscovery?: boolean;
+  isAdult?: boolean; // +18 Obligatoire
 }
 
 interface BookingInfo {
@@ -1833,17 +1834,27 @@ const PaymentModal = ({ isOpen, onClose, onConfirm, userCredits }: any) => {
 
 const UserProfileForm = ({ user, onClose }: any) => {
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [isAdult, setIsAdult] = useState(user.isAdult || false); // <-- NOUVEL ÉTAT
   const isFirstTime = !user.hasFilledForm;
   const [formData, setFormData] = useState({ birthDate: user.birthDate || '', street: user.street || '', zipCode: user.zipCode || '', city: user.city || '', phone: user.phone || '', emergencyContact: user.emergencyContact || '', emergencyPhone: user.emergencyPhone || '' });
   const [health1, setHealth1] = useState(false); const [health2, setHealth2] = useState(false); const [health3, setHealth3] = useState(false); const [imageRights, setImageRights] = useState<'yes' | 'no' | null>(user.imageRights || null); const [saving, setSaving] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault(); if (isFirstTime) { 
+    e.preventDefault(); 
+    if (isFirstTime) { 
       if (!health1 || !health2 || !health3) return alert("⚠️ Tu dois obligatoirement cocher les 3 cases concernant l'état de santé."); 
       if (!imageRights) return alert("⚠️ Tu dois indiquer ton choix concernant le droit à l'image."); 
       if (!acceptTerms) return alert("⚠️ Tu dois accepter les CGV et la politique de confidentialité.");
+      if (!isAdult) return alert("⚠️ Tu dois certifier avoir plus de 18 ans."); // <-- NOUVELLE VÉRIFICATION
     }
-    setSaving(true); try { await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true }); await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, adminMemo: user.adminMemo || '', ...formData }); if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅"); onClose(); } catch (e) { alert("Erreur."); } setSaving(false);
+    setSaving(true); 
+    try { 
+      await updateDoc(doc(db, "users", user.id), { ...formData, hasFilledForm: true, imageRights, legalAccepted: true, isAdult }); // <-- isAdult AJOUTÉ ICI
+      await syncToSheet({ type: 'PROFILE', id: user.id, displayName: user.displayName, email: user.email, credits: user.credits, imageRights, legalAccepted: true, isAdult, adminMemo: user.adminMemo || '', ...formData }); // <-- isAdult AJOUTÉ ICI
+      if (isFirstTime) { sendNotification(`Nouvel élève inscrit : ${user.displayName}`, 'NEW_STUDENT'); alert("Bienvenue ! Profil complet. 🎉"); } else alert("Profil mis à jour ! ✅"); 
+      onClose(); 
+    } catch (e) { alert("Erreur."); } 
+    setSaving(false);
   };
   return (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 text-left"><div className="bg-white p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto relative theme-card"><h2 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><User className="text-amber-600"/> {isFirstTime ? 'Inscription' : 'Mon Profil'}</h2>{isFirstTime && <p className="text-sm text-gray-500 mb-4">Dernière étape avant de pouvoir réserver !</p>}<form onSubmit={handleSave} className="space-y-4 mt-4"><div className="bg-gray-50 p-3 mb-4 text-sm text-gray-500 border theme-card"><p className="font-bold text-gray-800">{user.displayName}</p><p>{user.email}</p></div><div className="space-y-3"><h3 className="font-bold flex items-center gap-2"><Phone size={16} className="text-blue-500"/> Date de Naissance et Téléphone</h3><div className="flex gap-2"><input type="date" required value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" title="Date de naissance" /><input required placeholder="Téléphone *" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-1/2 p-3 border outline-none focus:border-amber-500 theme-btn" /></div><h3 className="font-bold flex items-center gap-2 mt-4"><Home size={16} className="text-indigo-500"/> Adresse</h3><input required placeholder="Numéro et Rue *" value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} className="w-full p-3 border outline-none focus:border-amber-500 theme-btn" /><div className="flex gap-2"><input required placeholder="Code Postal *" value={formData.zipCode} onChange={e => setFormData({...formData, zipCode: e.target.value})} className="w-1/3 p-3 border outline-none focus:border-amber-500 theme-btn" /><input required placeholder="Ville *" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} className="w-2/3 p-3 border outline-none focus:border-amber-500 theme-btn" /></div></div><div className="space-y-3 mt-4 pt-4 border-t"><h3 className="font-bold flex items-center gap-2"><HeartPulse size={16} className="text-red-500"/> Contact d'Urgence</h3><input required placeholder="Nom personne à prévenir *" value={formData.emergencyContact} onChange={e => setFormData({...formData, emergencyContact: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /><input required placeholder="Téléphone d'urgence *" value={formData.emergencyPhone} onChange={e => setFormData({...formData, emergencyPhone: e.target.value})} className="w-full p-3 border outline-none focus:border-red-500 theme-btn" /></div>{isFirstTime && (<div className="mt-6 pt-6 border-t space-y-5"><div><h3 className="font-bold text-lg">État de santé et décharge</h3><p className="text-xs text-red-500 font-bold mb-3 mt-1">Je confirme (Obligatoire) :</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="checkbox" checked={health1} onChange={e => setHealth1(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être en bonne condition physique et n'avoir aucune contre-indication.</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health2} onChange={e => setHealth2(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Avoir conscience des risques liés à la pole dance (bleus, glissades).</span></label><label className="flex items-start gap-3"><input type="checkbox" checked={health3} onChange={e => setHealth3(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Être couverte par ma propre assurance RC.</span></label></div></div><div className="pt-2"><h3 className="font-bold text-lg">Droit à l'image</h3><p className="text-xs text-gray-500 font-bold mb-3 mt-1">Acceptes-tu d'apparaître sur les réseaux ? *</p><div className="space-y-3"><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="yes" checked={imageRights === 'yes'} onChange={() => setImageRights('yes')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Oui, j'accepte que des photos/vidéos soient publiées.</span></label><label className="flex items-start gap-3"><input type="radio" name="imageRights" value="no" checked={imageRights === 'no'} onChange={() => setImageRights('no')} className="mt-1 w-5 h-5 accent-amber-500" required={isFirstTime} /><span className="text-sm">Non, je préfère ne pas apparaître.</span></label></div></div></div>)}{isFirstTime && (
               <div className="pt-4 mt-2">
@@ -1851,6 +1862,12 @@ const UserProfileForm = ({ user, onClose }: any) => {
                   <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500 shrink-0" required={isFirstTime} />
                   <span className="text-sm font-bold text-amber-900 leading-tight">
                     J'accepte les <button type="button" onClick={() => {onClose(); window.location.hash='#/cgv';}} className="text-amber-600 underline hover:text-amber-700">CGV</button> et la <button type="button" onClick={() => {onClose(); window.location.hash='#/confidentialite';}} className="text-amber-600 underline hover:text-amber-700">Politique de confidentialité</button>. J'autorise Vertic'Ali à stocker mes données.
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl cursor-pointer theme-card">
+                  <input type="checkbox" checked={isAdult} onChange={e => setIsAdult(e.target.checked)} className="mt-1 w-5 h-5 accent-amber-500 shrink-0" required={isFirstTime} />
+                  <span className="text-sm font-bold text-amber-900 leading-tight">
+                    Je certifie avoir plus de 18 ans.
                   </span>
                 </label>
               </div>
