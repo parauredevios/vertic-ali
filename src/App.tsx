@@ -60,6 +60,7 @@ interface B2BInvoiceItem { desc: string; qty: number; price: number; total?: num
 interface B2BInvoice {
   id: string; clientId: string; clientName: string; date: string; items?: B2BInvoiceItem[]; desc?: string; qty?: number; price?: number; total: number;
   status: 'DEVIS' | 'FACTURE'; paymentStatus: 'PENDING' | 'PAID'; paymentMethod: 'ESPECE' | 'VIREMENT_RIB' | 'WERO_PAYPAL'; paidAt?: string; updatedAt?: string;
+  invoiceType?: 'B2B' | 'B2C';
 }
 
 interface AppNotification { id: string; text: string; date: string; read: boolean; type: 'BOOKING' | 'CANCEL' | 'BOUTIQUE' | 'NEW_STUDENT'; }
@@ -181,10 +182,16 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   doc.setTextColor(0, 0, 0); 
 };
 
-const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130) => {
+const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130, paymentInfo: string = "") => {
   doc.setDrawColor(200); doc.line(15, totalsY, 195, totalsY); 
   doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, totalsY + 10); doc.text("TVA", 140, totalsY + 17); doc.text("Total TTC", 140, totalsY + 27);
   doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, totalsY + 10); doc.text("0,00 €", 175, totalsY + 17); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, totalsY + 27);
+  
+  if (paymentInfo) {
+    doc.setFontSize(9); doc.setFont("helvetica", "italic"); doc.setTextColor(50, 50, 50);
+    doc.text(paymentInfo, 15, totalsY + 15);
+  }
+
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
   const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€." ];
   let y = 238; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4; });
@@ -197,12 +204,31 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130
 
 const getB2CInvoiceIndex = async (targetId: string, invoiceDate: Date) => {
   const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-  const [snapB, snapP] = await Promise.all([ getDocs(query(collection(db, DB_PREFIX + "bookings"), where("paymentStatus", "==", "PAID"))), getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("status", "==", "PAID"))) ]);
+  const [snapB, snapP, snapCustom] = await Promise.all([ 
+    getDocs(query(collection(db, DB_PREFIX + "bookings"), where("paymentStatus", "==", "PAID"))), 
+    getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("status", "==", "PAID"))),
+    getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", "FACTURE"))) 
+  ]);
   const b = snapB.docs.map(d=>({id: d.id, ...d.data()})).filter((x:any) => x.paymentMethod !== 'CREDIT');
   const p = snapP.docs.map(d=>({id: d.id, ...d.data()}));
-  const all = [...b, ...p].filter((x:any) => { const d = x.paidAt ? new Date(x.paidAt) : new Date(x.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a:any, b:any) => { const da = a.paidAt ? new Date(a.paidAt) : new Date(a.date); const db = b.paidAt ? new Date(b.paidAt) : new Date(b.date); return da.getTime() - db.getTime(); });
+  const c = snapCustom.docs.map(d=>({id: d.id, ...d.data()})).filter((x:any) => x.paymentStatus === 'PAID' && x.invoiceType === 'B2C');
+  
+  const all = [...b, ...p, ...c].filter((x:any) => { 
+    const d = x.paidAt ? new Date(x.paidAt) : new Date(x.date); 
+    return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; 
+  }).sort((a:any, b:any) => { 
+    const da = a.paidAt ? new Date(a.paidAt) : new Date(a.date); 
+    const db = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
+    return da.getTime() - db.getTime(); 
+  });
   let index = all.findIndex(x => x.id === targetId) + 1; if (index === 0) index = all.length + 1;
   return `FAC-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
+};
+
+const getPaymentInfoStr = (status: string, methodCode: string, dateStr: string) => {
+  const methodMap: Record<string,string> = {'CASH': 'Espèces', 'ESPECE': 'Espèces', 'WERO_RIB': 'Virement / Wero', 'CREDIT': 'Crédits', 'VIREMENT_RIB': 'Virement', 'WERO_PAYPAL': 'Wero / Paypal'};
+  const methodFr = methodMap[methodCode] || methodCode;
+  return status === 'PAID' ? `Facture acquittée par ${methodFr} le ${dateStr}` : `Facture en attente de règlement (${methodFr})`;
 };
 
 const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProfile | null, classInfo: { title: string, startAt: Date, price?: string }) => {
@@ -216,7 +242,8 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   
-  let rawPrice = classInfo.price || booking.price || '0'; 
+  // SÉCURITÉ : On force le prix en texte pour éviter l'erreur de votre capture image_adea40.jpg
+  let rawPrice = String(classInfo.price || booking.price || '0'); 
   rawPrice = rawPrice.replace('€', '').replace('Crédit', '').replace('crédit', '').trim(); 
   if (isNaN(Number(rawPrice))) rawPrice = "0"; 
   const priceVal = `${rawPrice},00 €`;
@@ -227,30 +254,20 @@ const generateInvoicePDF = async (booking: BookingInfo, studentProfile: UserProf
   doc.text(`Le ${classInfo.startAt.toLocaleDateString('fr-FR')} à ${classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`, 20, 115); 
   doc.setFontSize(10); 
   doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); 
+  
+  // On ne garde que la date, sans l'heure
+  const paidDateOnly = invoiceDate.toLocaleDateString('fr-FR');
+  const paymentInfo = getPaymentInfoStr(booking.paymentStatus, booking.paymentMethod, paidDateOnly);
+  renderInvoiceFooter(doc, priceVal, 130, paymentInfo); 
 
   const prefix = isDemoMode ? "TEST_" : "";
   const fileName = `${prefix}Facture_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`;
 
-  // 1. Sauvegarde sur l'ordinateur
   doc.save(fileName);
-
-  // 2. Envoi silencieux vers Google Drive
   try {
     const pdfBase64 = doc.output('datauristring').split(',')[1];
-    fetch(GOOGLE_DRIVE_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: 'DRIVE_SAVE',
-        pdfBase64: pdfBase64,
-        fileName: fileName
-      })
-    });
-  } catch (e) {
-    console.log("Erreur envoi Drive:", e);
-  }
+    fetch(GOOGLE_DRIVE_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: 'DRIVE_SAVE', pdfBase64: pdfBase64, fileName: fileName }) });
+  } catch (e) { console.log("Erreur envoi Drive:", e); }
 };
 
 const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: UserProfile | null) => {
@@ -261,16 +278,29 @@ const generatePackInvoicePDF = async (purchase: CreditPurchase, studentProfile: 
   await renderInvoiceBase(doc, "FACTURE", invNumber, dateStr, clientName, address);
   const priceVal = `${purchase.price.toFixed(2).replace('.', ',')} €`;
   doc.setFont("helvetica", "normal"); doc.text(`Boutique : ${purchase.packName} (${purchase.qty} crédits)`, 20, 110); doc.text("1", 112, 110); doc.text(priceVal, 130, 110); doc.text("0", 160, 110); doc.text(priceVal, 175, 110);
-  renderInvoiceFooter(doc, priceVal); doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`);
+  
+  // Date uniquement
+  const paidDateOnly = invoiceDate.toLocaleDateString('fr-FR');
+  const paymentInfo = getPaymentInfoStr(purchase.status, purchase.paymentMethod, paidDateOnly);
+  renderInvoiceFooter(doc, priceVal, 130, paymentInfo); 
+  doc.save(`Facture_Boutique_${clientName.replace(/\s+/g, '_')}_${editionDateStr}.pdf`);
 };
 
 const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => {
-  const invoiceDate = new Date(invoice.date); const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
-  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE'; const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
-  const snap = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", invoice.status)));
-  const monthInvoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).filter(i => { const d = new Date(i.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = monthInvoices.length + 1;
-  const invNumber = `${prefix}-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
+  const invoiceDate = invoice.paidAt ? new Date(invoice.paidAt) : new Date(invoice.date); 
+  const yyyy = invoiceDate.getFullYear(); const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+  const typeDoc = invoice.status === 'DEVIS' ? 'DEVIS' : 'FACTURE'; 
+  let invNumber = "";
+  
+  if (invoice.status === 'FACTURE' && invoice.invoiceType === 'B2C') {
+    invNumber = await getB2CInvoiceIndex(invoice.id, invoiceDate);
+  } else {
+    const prefix = invoice.status === 'DEVIS' ? 'DEV' : 'FAC-PRO';
+    const snap = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", invoice.status)));
+    const monthInvoices = snap.docs.map(d => ({ id: d.id, ...d.data() } as B2BInvoice)).filter(i => { const d = i.paidAt ? new Date(i.paidAt) : new Date(i.date); return d.getFullYear() === yyyy && String(d.getMonth() + 1).padStart(2, '0') === mm && i.invoiceType !== 'B2C'; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    let index = monthInvoices.findIndex(i => i.id === invoice.id) + 1; if (index === 0) index = monthInvoices.length + 1;
+    invNumber = `${prefix}-${yyyy}${mm}-${String(index).padStart(3, '0')}`;
+  }
 
   const doc = new jsPDF(); const dateStr = invoiceDate.toLocaleDateString('fr-FR'); const editionDateStr = dateStr.replace(/\//g,'-');
   await renderInvoiceBase(doc, typeDoc, invNumber, dateStr, client.name, client.address, client.siret);
@@ -285,8 +315,14 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
     startY += (splitDesc.length * 5) + 3;
   });
   const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
-  renderInvoiceFooter(doc, totalVal, Math.max(130, startY + 5)); 
-  doc.save(`${typeDoc}_PRO_${client.name.replace(/\s+/g, '_')}_${editionDateStr}.pdf`);
+  
+  // Date uniquement
+  const paidDateOnly = invoiceDate.toLocaleDateString('fr-FR');
+  const paymentInfo = invoice.status === 'FACTURE' ? getPaymentInfoStr(invoice.paymentStatus, invoice.paymentMethod, paidDateOnly) : '';
+  renderInvoiceFooter(doc, totalVal, Math.max(130, startY + 5), paymentInfo); 
+  
+  const fileNameSuffix = invoice.invoiceType === 'B2C' ? `Groupe_${client.name.replace(/\s+/g, '_')}` : `PRO_${client.name.replace(/\s+/g, '_')}`;
+  doc.save(`${typeDoc}_${fileNameSuffix}_${editionDateStr}.pdf`);
 };
 
 // --- COMPOSANTS ADMIN ---
@@ -299,25 +335,31 @@ const AdminDashboardTab = ({ reminderDays, today }: { reminderDays: number, toda
     const fetchDashboardData = async () => {
       const currentYear = today.getFullYear(); const firstDayOfMonth = new Date(currentYear, today.getMonth(), 1); const firstDayOfYear = new Date(currentYear, 0, 1);
       let caMB2C = 0; let caMB2B = 0; let caYB2C = 0; let caYB2B = 0; let lateItems: any[] = [];
+      
       const snapB2C = await getDocs(query(collection(db, DB_PREFIX + "bookings")));
       snapB2C.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as BookingInfo; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); 
-        // Ligne à chercher et remplacer dans AdminDashboardTab
-if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number(String(b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
+        if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum = Number(String(b.price || '0').replace('€', '').replace('Crédit', '').trim()); if (!isNaN(priceNum)) { if (accDate >= firstDayOfMonth) caMB2C += priceNum; if (accDate >= firstDayOfYear) caYB2C += priceNum; } }
         if (b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.userName.replace(' (Manuel)', ''), desc: `${b.classTitle} du ${new Date(b.date).toLocaleDateString('fr-FR')}`, price: b.price || '?', method: b.paymentMethod, type: 'Élève', dateObj: accDate }); }
       });
+      
       const snapBoutique = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases")));
       snapBoutique.docs.forEach(d => {
         const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date);
         if (p.status === 'PAID') { if (accDate >= firstDayOfMonth) caMB2C += p.price; if (accDate >= firstDayOfYear) caYB2C += p.price; }
         if (p.status === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: d.id, name: p.userName, desc: `Boutique : ${p.packName}`, price: `${p.price} €`, method: p.paymentMethod, type: 'Boutique', dateObj: accDate }); }
       });
+      
       const snapB2B = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices")));
       snapB2B.docs.forEach(d => {
         const b = { id: d.id, ...d.data() } as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date);
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
-        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.clientName, desc: `Prestation PRO : ${b.desc || ''}`, price: `${b.total} €`, method: b.paymentMethod, type: 'PRO', dateObj: accDate }); }
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PAID') { 
+          if (b.invoiceType === 'B2C') { if (accDate >= firstDayOfMonth) caMB2C += b.total; if (accDate >= firstDayOfYear) caYB2C += b.total; } 
+          else { if (accDate >= firstDayOfMonth) caMB2B += b.total; if (accDate >= firstDayOfYear) caYB2B += b.total; }
+        }
+        if (b.status === 'FACTURE' && b.paymentStatus === 'PENDING') { const diffDays = Math.ceil((today.getTime() - accDate.getTime()) / (1000 * 60 * 60 * 24)); if (diffDays >= reminderDays && accDate < today) lateItems.push({ id: b.id, name: b.clientName, desc: `${b.invoiceType === 'B2C' ? 'Groupe/Privé' : 'PRO'} : ${b.desc || ''}`, price: `${b.total} €`, method: b.paymentMethod, type: b.invoiceType === 'B2C' ? 'Élève' : 'PRO', dateObj: accDate }); }
       });
+      
       setStats({ caMonthB2C: caMB2C, caMonthB2B: caMB2B, caYearB2C: caYB2C, caYearB2B: caYB2B, pendingCount: lateItems.length }); setReminders(lateItems.sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime())); setLoading(false);
     }; fetchDashboardData();
   }, [reminderDays, today]);
@@ -328,7 +370,7 @@ if (b.paymentStatus === 'PAID' && b.paymentMethod !== 'CREDIT') { let priceNum =
       const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999); let exportRows: any[] = [];
       const snapB2C = await getDocs(query(collection(db, DB_PREFIX + "bookings"), where("paymentStatus", "==", "PAID"))); snapB2C.docs.forEach(d => { const b = d.data() as BookingInfo; if (b.paymentMethod === 'CREDIT') return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) { let priceNum = Number((b.price || '0').replace('€', '').trim()); if (!isNaN(priceNum) && priceNum > 0) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Cours)', client: b.userName.replace(' (Manuel)', ''), desc: b.classTitle, method: b.paymentMethod, amount: priceNum }); } });
       const snapBoutique = await getDocs(query(collection(db, DB_PREFIX + "credit_purchases"), where("status", "==", "PAID"))); snapBoutique.docs.forEach(d => { const p = d.data() as CreditPurchase; const accDate = p.paidAt ? new Date(p.paidAt) : new Date(p.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2C (Boutique)', client: p.userName, desc: p.packName, method: p.paymentMethod, amount: p.price }); });
-      const snapB2B = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", "FACTURE"), where("paymentStatus", "==", "PAID"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: 'B2B (PRO)', client: b.clientName, desc: b.desc || 'Prestation', method: b.paymentMethod, amount: b.total }); });
+      const snapB2B = await getDocs(query(collection(db, DB_PREFIX + "b2b_invoices"), where("status", "==", "FACTURE"))); snapB2B.docs.forEach(d => { const b = d.data() as B2BInvoice; if(b.paymentStatus !== "PAID") return; const accDate = b.paidAt ? new Date(b.paidAt) : new Date(b.date); if (accDate >= start && accDate <= endOfDay) exportRows.push({ dateObj: accDate, dateStr: accDate.toLocaleString('fr-FR'), type: b.invoiceType === 'B2C' ? 'B2C (Groupe Privé)' : 'B2B (PRO)', client: b.clientName, desc: b.desc || 'Prestation', method: b.paymentMethod, amount: b.total }); });
       exportRows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
       let csvContent = "Date de Paiement;Type de Client;Nom du Client;Description;Moyen de Paiement;Montant (EUR)\n"; let totalAmount = 0;
       exportRows.forEach(r => { const safeDesc = r.desc.replace(/"/g, '""').replace(/\n/g, ' '); const safeClient = r.client.replace(/"/g, '""'); csvContent += `${r.dateStr};${r.type};"${safeClient}";"${safeDesc}";${r.method};${r.amount}\n`; totalAmount += r.amount; });
@@ -447,7 +489,7 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
   const [allBookings, setAllBookings] = useState<BookingInfo[]>([]); const [usersInfo, setUsersInfo] = useState<{ [key: string]: UserProfile }>({});
   const [proClients, setProClients] = useState<ProClient[]>([]); const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
   const [newProClient, setNewProClient] = useState<Partial<ProClient>>({}); const [editingProId, setEditingProId] = useState<string | null>(null);
-  const [b2bInvoiceData, setB2bInvoiceData] = useState<{clientId: string, items: B2BInvoiceItem[]}>({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); 
+  const [b2bInvoiceData, setB2bInvoiceData] = useState<{clientId: string, items: B2BInvoiceItem[], invoiceType: 'B2B' | 'B2C'}>({ clientId: '', items: [{desc: '', qty: 1, price: 0}], invoiceType: 'B2B' }); 
   const [editingB2bId, setEditingB2bId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -467,7 +509,23 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
 
   const handleAddProClient = async (e: React.FormEvent) => { e.preventDefault(); if (!newProClient.name || !newProClient.address) return; if (editingProId) { await updateDoc(doc(db, "pro_clients", editingProId), newProClient); setEditingProId(null); } else { await addDoc(collection(db, "pro_clients"), newProClient); } setNewProClient({ name: '', address: '', siret: '' }); const snap = await getDocs(collection(db, "pro_clients")); setProClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProClient))); };
   const handleDeleteProClient = async (id: string) => { if (!confirm("Supprimer ce client ?")) return; await deleteDoc(doc(db, "pro_clients", id)); setProClients(proClients.filter(c => c.id !== id)); };
-  const handleCreateDevis = async (e: React.FormEvent) => { e.preventDefault(); const client = proClients.find(c => c.id === b2bInvoiceData.clientId); if (!client || b2bInvoiceData.items.length === 0 || b2bInvoiceData.items.some(i => !i.desc || i.qty <= 0 || i.price < 0)) return alert("Champs invalides."); const nowStr = new Date().toISOString(); const total = b2bInvoiceData.items.reduce((sum, item) => sum + (item.qty * item.price), 0); const payload = { clientId: client.id, clientName: client.name, items: b2bInvoiceData.items, total, updatedAt: nowStr, desc: b2bInvoiceData.items[0].desc }; if (editingB2bId) { await updateDoc(doc(db, "b2b_invoices", editingB2bId), payload); setEditingB2bId(null); } else { await addDoc(collection(db, DB_PREFIX + "b2b_invoices"), { ...payload, date: nowStr, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); } setB2bInvoiceData({ clientId: '', items: [{desc: '', qty: 1, price: 0}] }); };
+  
+  const handleCreateDevis = async (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    const client = proClients.find(c => c.id === b2bInvoiceData.clientId); 
+    if (!client || b2bInvoiceData.items.length === 0 || b2bInvoiceData.items.some(i => !i.desc || i.qty <= 0 || i.price < 0)) return alert("Champs invalides."); 
+    const nowStr = new Date().toISOString(); 
+    const total = b2bInvoiceData.items.reduce((sum, item) => sum + (item.qty * item.price), 0); 
+    const payload = { clientId: client.id, clientName: client.name, items: b2bInvoiceData.items, total, updatedAt: nowStr, desc: b2bInvoiceData.items[0].desc, invoiceType: b2bInvoiceData.invoiceType }; 
+    if (editingB2bId) { 
+      await updateDoc(doc(db, "b2b_invoices", editingB2bId), payload); 
+      setEditingB2bId(null); 
+    } else { 
+      await addDoc(collection(db, DB_PREFIX + "b2b_invoices"), { ...payload, date: nowStr, status: 'DEVIS', paymentStatus: 'PENDING', paymentMethod: 'VIREMENT_RIB' }); 
+    } 
+    setB2bInvoiceData({ clientId: '', items: [{desc: '', qty: 1, price: 0}], invoiceType: 'B2B' }); 
+  };
+
   const handleDeleteB2b = async (id: string) => { if (confirm("Supprimer cette prestation ?")) await deleteDoc(doc(db, "b2b_invoices", id)); };
   const handleB2BAction = async (invoice: B2BInvoice, action: 'TO_FACTURE' | 'TOGGLE_PAYMENT' | 'CHANGE_METHOD', newVal?: string) => { const ref = doc(db, "b2b_invoices", invoice.id); let updates: any = {}; const nowStr = new Date().toISOString(); if (action === 'TO_FACTURE') { if(!confirm("Transformer ce Devis en Facture ?")) return; updates = { status: 'FACTURE', date: nowStr, updatedAt: nowStr }; } else if (action === 'TOGGLE_PAYMENT') { const newStatus = invoice.paymentStatus === 'PAID' ? 'PENDING' : 'PAID'; updates = { paymentStatus: newStatus, updatedAt: nowStr, paidAt: newStatus === 'PAID' ? nowStr : null }; } else if (action === 'CHANGE_METHOD' && newVal) { updates = { paymentMethod: newVal, updatedAt: nowStr }; } await updateDoc(ref, updates); const updatedInvoice = { ...invoice, ...updates }; setB2bInvoices(b2bInvoices.map(i => i.id === invoice.id ? updatedInvoice : i)); if (updatedInvoice.status === 'FACTURE') { syncToSheet({ type: 'B2B_UPDATE', id: updatedInvoice.id, clientName: updatedInvoice.clientName, date: new Date(updatedInvoice.date).toLocaleDateString('fr-FR'), desc: updatedInvoice.desc || (updatedInvoice.items && updatedInvoice.items[0]?.desc), qty: updatedInvoice.qty || 1, price: updatedInvoice.price || updatedInvoice.total, total: updatedInvoice.total, paymentStatus: updatedInvoice.paymentStatus, paymentMethod: updatedInvoice.paymentMethod }); } };
 
@@ -478,7 +536,20 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><Users className="text-indigo-500"/> Annuaire Clients Pro</h3><form onSubmit={handleAddProClient} className="flex flex-col gap-2 mb-6 bg-gray-50 p-4 rounded-xl border border-gray-200 theme-card"><input value={newProClient.name || ''} onChange={e=>setNewProClient({...newProClient, name: e.target.value})} placeholder="Nom *" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><input value={newProClient.address || ''} onChange={e=>setNewProClient({...newProClient, address: e.target.value})} placeholder="Adresse complète *" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><input value={newProClient.siret || ''} onChange={e=>setNewProClient({...newProClient, siret: e.target.value})} placeholder="SIRET" className="p-2 border rounded-lg outline-none text-sm theme-btn"/><div className="flex gap-2 mt-2">{editingProId && <button type="button" onClick={()=>{setEditingProId(null); setNewProClient({name:'', address:'', siret:''});}} className="flex-1 py-2 bg-gray-200 text-gray-700 font-bold theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-gray-800 text-white font-bold py-2 theme-btn">{editingProId ? 'Mettre à jour' : 'Ajouter'}</button></div></form><div className="space-y-2 max-h-40 overflow-y-auto pr-2">{proClients.map(c => (<div key={c.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm theme-card"><div><p className="font-bold text-sm text-gray-800">{c.name}</p><p className="text-xs text-gray-500">{c.address}</p></div><div className="flex gap-1"><button onClick={() => { setNewProClient(c); setEditingProId(c.id); }} className="text-amber-500 p-2"><Edit2 size={16}/></button><button onClick={() => handleDeleteProClient(c.id)} className="text-red-500 p-2"><Trash2 size={16}/></button></div></div>))}</div></div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 theme-card"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>{proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200 ring-4 ring-indigo-50 theme-card"><h3 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-lg"><FileSignature className="text-indigo-600"/> {editingB2bId ? 'Modifier la prestation' : 'Nouveau Devis PRO'}</h3>
+            
+            <div className="flex flex-col gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100 mb-4 theme-card">
+               <label className="flex items-center gap-2 text-sm font-bold text-indigo-900 cursor-pointer">
+                 <input type="radio" name="invType" value="B2B" checked={b2bInvoiceData.invoiceType === 'B2B'} onChange={() => setB2bInvoiceData({...b2bInvoiceData, invoiceType: 'B2B'})} className="w-4 h-4 accent-indigo-600"/>
+                 Client PRO (Numérotation classique FAC-PRO)
+               </label>
+               <label className="flex items-center gap-2 text-sm font-bold text-indigo-900 cursor-pointer">
+                 <input type="radio" name="invType" value="B2C" checked={b2bInvoiceData.invoiceType === 'B2C'} onChange={() => setB2bInvoiceData({...b2bInvoiceData, invoiceType: 'B2C'})} className="w-4 h-4 accent-indigo-600"/>
+                 Groupe Privé / EVJF (Continuité élèves FAC-)
+               </label>
+            </div>
+
+            {proClients.length === 0 ? <p className="text-sm text-gray-500">Ajoutez d'abord un client.</p> : (<form onSubmit={handleCreateDevis} className="space-y-4">
               <select value={b2bInvoiceData.clientId} onChange={e=>setB2bInvoiceData({...b2bInvoiceData, clientId: e.target.value})} className="w-full p-3 border border-gray-200 bg-white outline-none focus:border-indigo-500 theme-btn"><option value="">-- Client --</option>{proClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
               <div className="space-y-3 bg-gray-50 p-3 rounded-xl border border-gray-200 theme-card">
                 <div className="flex justify-between items-center"><label className="text-xs font-bold text-gray-500 uppercase">Lignes de prestation</label></div>
@@ -496,10 +567,54 @@ const AdminInvoicesTab = ({ today }: { today: Date }) => {
                 ))}
                 <button type="button" onClick={() => setB2bInvoiceData({...b2bInvoiceData, items: [...b2bInvoiceData.items, {desc: '', qty: 1, price: 0}]})} className="w-full py-2 border-2 border-dashed border-indigo-200 text-indigo-600 font-bold rounded-lg text-sm flex justify-center gap-2 hover:bg-indigo-50 transition-colors theme-btn"><Plus size={16}/> Ajouter une ligne</button>
               </div>
-              <div className="flex gap-2 mt-4">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', items:[{desc:'', qty:1, price:0}]});}} className="flex-1 bg-gray-200 py-3 rounded-xl font-bold hover:bg-gray-300 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md theme-btn">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div>
+              <div className="flex gap-2 mt-4">{editingB2bId && <button type="button" onClick={()=>{setEditingB2bId(null); setB2bInvoiceData({clientId:'', items:[{desc:'', qty:1, price:0}], invoiceType: 'B2B'});}} className="flex-1 bg-gray-200 py-3 rounded-xl font-bold hover:bg-gray-300 theme-btn">Annuler</button>}<button type="submit" className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md theme-btn">{editingB2bId ? 'Mettre à jour' : 'Créer Devis'}</button></div>
             </form>)}</div>
           </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3><div className="space-y-4">{b2bInvoices.map(inv => { const client = proClients.find(c => c.id === inv.clientId); return (<div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3 theme-card"><div className="flex justify-between items-start"><div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 theme-btn">{inv.status}</span><span className="font-bold text-gray-800">{inv.clientName}</span></div><p className="text-sm text-gray-600">{inv.desc || (inv.items && inv.items[0]?.desc)}</p></div><div className="text-right flex flex-col items-end gap-2"><span className="text-lg font-black text-indigo-700">{inv.total} €</span>{client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100 theme-btn"><Download size={12}/> PDF</button>}</div></div>{inv.status === 'DEVIS' ? <div className="flex gap-2"><button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold theme-btn">Passer en Facture</button><button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, items: inv.items && inv.items.length > 0 ? inv.items : [{desc: inv.desc || '', qty: inv.qty || 1, price: inv.price || 0}] }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-50 theme-btn">Modifier</button><button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 theme-btn"><Trash2 size={16}/></button></div> : (<div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1"><select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 border bg-white outline-none theme-btn"><option value="ESPECE">Espèces</option><option value="VIREMENT_RIB">Virement</option><option value="WERO_PAYPAL">Wero/Paypal</option></select><button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 text-xs font-bold theme-btn ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}</button><button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>)}</div>); })}</div></div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 theme-card"><h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg"><FileText className="text-gray-500"/> Suivi des Prestations</h3>
+          <div className="space-y-4">
+            {b2bInvoices.map(inv => { 
+              const client = proClients.find(c => c.id === inv.clientId); 
+              return (
+                <div key={inv.id} className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col gap-3 theme-card">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-md theme-btn ${inv.invoiceType === 'B2C' ? 'bg-pink-100 text-pink-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                          {inv.status} {inv.invoiceType === 'B2C' ? '(Groupe)' : '(PRO)'}
+                        </span>
+                        <span className="font-bold text-gray-800">{inv.clientName}</span>
+                      </div>
+                      <p className="text-sm text-gray-600">{inv.desc || (inv.items && inv.items[0]?.desc)}</p>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <span className="text-lg font-black text-indigo-700">{inv.total} €</span>
+                      {client && <button onClick={() => generateB2BInvoicePDF(inv, client)} className="flex items-center gap-1 text-xs font-bold bg-white border border-gray-300 px-2 py-1.5 rounded-lg hover:bg-gray-100 theme-btn"><Download size={12}/> PDF</button>}
+                    </div>
+                  </div>
+                  {inv.status === 'DEVIS' ? (
+                    <div className="flex gap-2">
+                      <button onClick={() => handleB2BAction(inv, 'TO_FACTURE')} className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold theme-btn">Passer en Facture</button>
+                      <button onClick={() => { setEditingB2bId(inv.id); setB2bInvoiceData({ clientId: inv.clientId, items: inv.items && inv.items.length > 0 ? inv.items : [{desc: inv.desc || '', qty: inv.qty || 1, price: inv.price || 0}], invoiceType: inv.invoiceType || 'B2B' }); }} className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-50 theme-btn">Modifier</button>
+                      <button onClick={() => handleDeleteB2b(inv.id)} className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 theme-btn"><Trash2 size={16}/></button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 items-center border-t border-gray-200 pt-3 mt-1">
+                      <select value={inv.paymentMethod} onChange={(e) => handleB2BAction(inv, 'CHANGE_METHOD', e.target.value)} className="flex-[2] text-xs font-bold p-2 border bg-white outline-none theme-btn">
+                        <option value="ESPECE">Espèces</option>
+                        <option value="VIREMENT_RIB">Virement</option>
+                        <option value="WERO_PAYPAL">Wero/Paypal</option>
+                      </select>
+                      <button onClick={() => handleB2BAction(inv, 'TOGGLE_PAYMENT')} className={`flex-[2] flex justify-center gap-1 px-3 py-2 text-xs font-bold theme-btn ${inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                        {inv.paymentStatus === 'PAID' ? <CheckCircle size={14}/> : <Clock size={14}/>} {inv.paymentStatus === 'PAID' ? 'Payé' : 'À régler'}
+                      </button>
+                      <button onClick={() => handleDeleteB2b(inv.id)} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                    </div>
+                  )}
+                </div>
+              ); 
+            })}
+          </div>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
