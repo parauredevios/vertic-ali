@@ -2456,28 +2456,6 @@ useEffect(() => {
           <div className="bg-red-50 border-2 border-red-200 p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 shadow-sm theme-card"><div className="flex items-center gap-3 sm:gap-4 text-red-800 font-medium text-sm sm:text-base"><div className="p-2 sm:p-3 bg-red-100 rounded-full"><AlertTriangle size={24} className="text-red-600 sm:w-7 sm:h-7" /></div><div><p className="font-bold text-base sm:text-lg mb-0.5 sm:mb-1">Dernière étape !</p><p className="text-xs sm:text-sm opacity-90">Pour réserver, tu dois obligatoirement compléter tes coordonnées.</p></div></div><button onClick={() => setShowProfile(true)} className="w-full md:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-black shadow-lg flex justify-center gap-2 theme-btn"><UserPlus size={16} className="sm:w-[18px] sm:h-[18px]"/> Compléter mon profil</button></div>
         )}
 
-{/* --- BANDEAU SONDAGE DÉVELOPPEMENT STUDIO --- */}
-<div className="bg-indigo-50 border-2 border-indigo-200 p-4 sm:p-6 mb-6 sm:mb-8 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 shadow-sm theme-card">
-          <div className="flex items-center gap-3 sm:gap-4 text-indigo-800 font-medium text-sm sm:text-base">
-            <div className="p-2 sm:p-3 bg-indigo-100 rounded-full">
-              <Building size={24} className="text-indigo-600 sm:w-7 sm:h-7" />
-            </div>
-            <div>
-              <p className="font-bold text-base sm:text-lg mb-0.5 sm:mb-1">Studio Vertic'Ali - Un nouveau projet Pole Dance se prépare... 💃</p>
-              <p className="text-xs sm:text-sm opacity-90">Ce court questionnaire vous prendra moins de 5 minutes et nous aidera énormément à construire le studio de vos rêves. Merci pour votre aide !</p>
-            </div>
-          </div>
-          <a 
-            href="https://forms.gle/qUfWKJf2zeC7k8Mn9" 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="w-full md:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-black shadow-lg flex justify-center gap-2 theme-btn text-center transition-colors"
-          >
-            <FileText size={16} className="sm:w-[18px] sm:h-[18px] shrink-0"/> 
-            Accéder au formulaire
-          </a>
-        </div>
-
         {!devVis.hideTabs && (
           <nav className="flex overflow-x-auto hide-scrollbar gap-1 sm:gap-2 mb-6 sm:mb-8 bg-white p-1.5 shadow-sm border border-gray-100 theme-card">
             <button onClick={() => setActiveTab('accueil')} className={`flex items-center gap-1.5 px-3 sm:px-6 py-2 sm:py-3 font-bold whitespace-nowrap transition-colors theme-btn ${activeTab === 'accueil' ? 'bg-amber-100 text-amber-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}><Home size={16} className="sm:w-[18px] sm:h-[18px]"/><span className="text-xs sm:text-sm hidden sm:inline">{tHomeStr}</span></button>
