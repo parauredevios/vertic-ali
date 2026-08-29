@@ -832,7 +832,6 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
       let targetUserId = manualUserId;
       let targetUserName = '';
 
-      // CAS 1 : NOUVELLE ÉLÈVE FANTÔME
       if (manualUserId === 'NEW_STUDENT') {
         if (!newFirstName || !newLastName || !newEmail) { 
           alert("Veuillez remplir le prénom, nom et email."); 
@@ -841,7 +840,6 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
         }
         targetUserName = `${newFirstName.trim()} ${newLastName.trim()}`;
         
-        // Vérifier si l'email existe déjà dans la base
         const emailQ = query(collection(db, "users"), where("email", "==", newEmail.trim().toLowerCase()));
         const emailSnap = await getDocs(emailQ);
         if (!emailSnap.empty) { 
@@ -850,52 +848,6 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
           return; 
         }
 
-
-        const handleRemoveStudent = async (studentId: string, studentName: string, booking: any) => {
-          if (!window.confirm(`Es-tu sûre de vouloir retirer ${studentName} de ce cours ?`)) return;
-          
-          try {
-            await runTransaction(db, async (t) => {
-              const classRef = doc(db, DB_PREFIX + "classes", classInfo.id);
-              const userRef = doc(db, "users", studentId);
-              const classDoc = await t.get(classRef);
-              const userDoc = await t.get(userRef);
-              
-              if (!classDoc.exists() || !userDoc.exists()) throw "Document introuvable";
-              
-              const classData = classDoc.data();
-              const userData = userDoc.data();
-      
-              // Remboursement du crédit si payé par crédit
-              if (booking && booking.paymentMethod === 'CREDIT' && userData.creditPacks) {
-                  const updatedPacks = userData.creditPacks.map((p:any) => ({...p}));
-                  const packToRefund = updatedPacks.find((p:any) => p.remaining < p.qty) || updatedPacks[0];
-                  if (packToRefund) packToRefund.remaining += 1;
-                  t.update(userRef, { creditPacks: updatedPacks });
-              }
-      
-              // Mise à jour du cours (-1 place)
-              t.update(classRef, {
-                  attendeesCount: Math.max(0, (classData.attendeesCount || 1) - 1),
-                  attendeeIds: (classData.attendeeIds || []).filter((id: string) => id !== studentId)
-              });
-      
-              // Suppression de la facture/réservation
-              if (booking) {
-                  t.delete(doc(db, DB_PREFIX + "bookings", booking.id));
-              }
-            });
-            
-            // Notification silencieuse
-            sendNotification(`Admin a retiré ${studentName} du cours ${classInfo.title}`, 'CANCEL');
-            
-            if (onRefresh) onRefresh();
-            alert("Élève retiré avec succès !");
-          } catch (e) {
-            alert("Erreur lors de la suppression : " + e);
-          }
-        };
-        // Créer le profil fantôme dans la base de données
         const newUserRef = await addDoc(collection(db, "users"), {
           displayName: targetUserName,
           email: newEmail.trim().toLowerCase(),
@@ -905,59 +857,65 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
         });
         targetUserId = newUserRef.id;
       } 
-      // CAS 2 : ÉLÈVE DÉJÀ DANS LA LISTE
       else {
         const selectedUser = allUsers.find(u => u.id === manualUserId);
         if (!selectedUser) { setIsAdding(false); return; }
         targetUserName = selectedUser.displayName;
       }
 
-      // Mettre à jour le cours (+1)
-      const classRef = doc(db, "classes", classInfo.id);
-      await updateDoc(classRef, { 
-        attendeesCount: (classInfo.attendeesCount || 0) + 1, 
-        attendeeIds: [...(classInfo.attendeeIds || []), targetUserId] 
+      await runTransaction(db, async (t) => {
+        const classRef = doc(db, DB_PREFIX + "classes", classInfo.id);
+        const classDoc = await t.get(classRef);
+        const classData = classDoc.data();
+
+        if (!classData) throw "Cours introuvable en base de données.";
+        if ((classData.attendeeIds || []).includes(targetUserId)) throw "Cet élève est déjà inscrit à ce cours !";
+        
+        t.update(classRef, { 
+          attendeesCount: (classData.attendeesCount || 0) + 1, 
+          attendeeIds: [...(classData.attendeeIds || []), targetUserId] 
+        });
+
+        const dateStr = classData.startAt.toDate().toLocaleDateString('fr-FR');
+        const timeStr = classData.startAt.toDate().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+        const nowStr = new Date().toISOString();
+        const newBookingRef = doc(collection(db, DB_PREFIX + "bookings"));
+
+        t.set(newBookingRef, {
+          classId: classInfo.id, 
+          userId: targetUserId, 
+          userName: targetUserName + ' (Manuel)', 
+          classTitle: classData.title, 
+          date: classData.startAt.toDate().toISOString(), 
+          dateStr, timeStr,
+          location: classData.location, 
+          price: classData.price || '',
+          paymentMethod: 'CASH', 
+          paymentStatus: 'PENDING', 
+          updatedAt: nowStr
+        });
       });
 
-      // Créer la facture (En attente de paiement sur place)
-      const dateStr = classInfo.startAt.toLocaleDateString('fr-FR');
-      const timeStr = classInfo.startAt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-      const nowStr = new Date().toISOString();
-
-      await addDoc(collection(db, DB_PREFIX + "bookings"), {
-        classId: classInfo.id, 
-        userId: targetUserId, 
-        userName: targetUserName + ' (Manuel)', 
-        classTitle: classInfo.title, 
-        date: classInfo.startAt.toISOString(), 
-        dateStr, timeStr,
-        location: classInfo.location, 
-        price: classInfo.price || '',
-        paymentMethod: 'CASH', 
-        paymentStatus: 'PENDING', 
-        updatedAt: nowStr
-      });
-
-      // Nettoyer les champs
       setManualUserId(''); setNewFirstName(''); setNewLastName(''); setNewEmail('');
       if(onRefresh) onRefresh();
+      
     } catch(e) {
-      alert("Erreur lors de l'ajout.");
+      alert("Erreur lors de l'ajout : " + e);
     }
     setIsAdding(false);
   };
 
-const handlePaymentMethodChange = async (b: any, newMethod: string) => {
+  const handlePaymentMethodChange = async (b: any, newMethod: string) => {
     if (b.paymentMethod === newMethod) return;
 
-    // SCÉNARIO 1 : Passage en CRÉDIT (Décompte automatique)
     if (newMethod === 'CREDIT') {
       const student = allUsers.find(u => u.id === b.userId);
       if (!student || !student.creditPacks) return alert("Impossible de trouver les crédits de cet élève.");
 
       const now = new Date();
-      // On cherche les packs encore valides
-      const validPacks = student.creditPacks
+      const updatedPacks = student.creditPacks.map((pack: any) => ({ ...pack }));
+      
+      const validPacks = updatedPacks
         .filter((p: any) => p.remaining > 0 && new Date(p.expiresAt) > now)
         .sort((a: any, b: any) => new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime());
 
@@ -966,19 +924,17 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
         return;
       }
 
-      // On retire 1 crédit
       validPacks[0].remaining -= 1;
       const nowStr = now.toISOString();
 
       try {
-        await updateDoc(doc(db, "users", student.id), { creditPacks: student.creditPacks });
+        await updateDoc(doc(db, "users", student.id), { creditPacks: updatedPacks });
         await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), {
           paymentMethod: 'CREDIT',
           paymentStatus: 'PAID',
           paidAt: nowStr
         });
         
-        // Mise à jour de l'écran direct
         setClassBookings((prev: any[]) => prev.map((book: any) => 
           book.id === b.id ? { ...book, paymentMethod: 'CREDIT', paymentStatus: 'PAID', paidAt: nowStr } : book
         ));
@@ -987,7 +943,6 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
         alert("Erreur lors de la modification.");
       }
     } 
-    // SCÉNARIO 2 : Changement classique (Espèces <-> Wero)
     else {
       await updateDoc(doc(db, DB_PREFIX + "bookings", b.id), { paymentMethod: newMethod });
       setClassBookings((prev: any[]) => prev.map((book: any) => book.id === b.id ? { ...book, paymentMethod: newMethod } : book));
@@ -1001,36 +956,29 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
     const nowStr = new Date().toISOString();
 
     try {
-      // 1. Mise à jour Firebase
       await updateDoc(doc(db, DB_PREFIX + "bookings", bookingId), {
         paymentStatus: newStatus,
         updatedAt: nowStr,
         paidAt: newStatus === 'PAID' ? nowStr : null
       });
 
-      // 2. Mise à jour écran
       setClassBookings((prev: any[]) => prev.map((book: any) => 
         book.id === bookingId ? { ...book, paymentStatus: newStatus, paidAt: newStatus === 'PAID' ? nowStr : null } : book
       ));
 
-      // 3. Si le cours est marqué comme PAYÉ, on génère et on envoie la facture
       if (newStatus === 'PAID') {
         const docPDF = new jsPDF();
-        // On utilise la même logique que ton bouton de téléchargement habituel
         const invNumber = await getB2CInvoiceIndex(bookingId, new Date());
         const dateStr = new Date().toLocaleDateString('fr-FR');
         
-        // On prépare le PDF (le moteur de l'application)
         await renderInvoiceBase(docPDF, "FACTURE", invNumber, dateStr, b.userName.replace(" (Manuel)", ""), "");
         
-        // Contenu de la facture
         docPDF.setFont("helvetica", "normal");
         docPDF.text(`Cours : ${classInfo.title}`, 20, 110);
         const priceVal = `${(b.price || '0').replace('€', '').trim()},00 €`;
         docPDF.text("1", 112, 110); docPDF.text(priceVal, 130, 110); docPDF.text("0", 160, 110); docPDF.text(priceVal, 175, 110);
         renderInvoiceFooter(docPDF, priceVal);
 
-        // 🚀 ENVOI VERS GOOGLE DRIVE
         const pdfBase64 = docPDF.output('datauristring').split(',')[1];
         const prefix = isDemoMode ? "TEST_" : "";
         const fileName = `${prefix}Facture_${b.userName.replace(/\s+/g, '_')}_${dateStr.replace(/\//g,'-')}.pdf`;
@@ -1047,7 +995,6 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
         });
       }
 
-      // 4. Synchro Sheet classique
       syncToSheet({
         type: 'BOOKING_UPDATE',
         classId: classInfo.id,
@@ -1059,6 +1006,48 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
 
     } catch (e) {
       alert("Erreur lors de la mise à jour.");
+    }
+  };
+
+  // VOICI LA FONCTION PLACÉE AU BON ENDROIT
+  const handleRemoveStudent = async (studentId: string, studentName: string, booking: any) => {
+    if (!window.confirm(`Es-tu sûre de vouloir retirer ${studentName} de ce cours ?`)) return;
+    
+    try {
+      await runTransaction(db, async (t) => {
+        const classRef = doc(db, DB_PREFIX + "classes", classInfo.id);
+        const userRef = doc(db, "users", studentId);
+        const classDoc = await t.get(classRef);
+        const userDoc = await t.get(userRef);
+        
+        if (!classDoc.exists() || !userDoc.exists()) throw "Document introuvable";
+        
+        const classData = classDoc.data();
+        const userData = userDoc.data();
+
+        if (booking && booking.paymentMethod === 'CREDIT' && userData.creditPacks) {
+            const updatedPacks = userData.creditPacks.map((p:any) => ({...p}));
+            const packToRefund = updatedPacks.find((p:any) => p.remaining < p.qty) || updatedPacks[0];
+            if (packToRefund) packToRefund.remaining += 1;
+            t.update(userRef, { creditPacks: updatedPacks });
+        }
+
+        t.update(classRef, {
+            attendeesCount: Math.max(0, (classData.attendeesCount || 1) - 1),
+            attendeeIds: (classData.attendeeIds || []).filter((id: string) => id !== studentId)
+        });
+
+        if (booking) {
+            t.delete(doc(db, DB_PREFIX + "bookings", booking.id));
+        }
+      });
+      
+      sendNotification(`Admin a retiré ${studentName} du cours ${classInfo.title}`, 'CANCEL');
+      
+      if (onRefresh) onRefresh();
+      alert("Élève retiré avec succès !");
+    } catch (e) {
+      alert("Erreur lors de la suppression : " + e);
     }
   };
 
@@ -1074,7 +1063,6 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
           return (
             <div key={u.id} className="flex flex-col gap-1.5 bg-white p-2.5 border border-gray-100 rounded shadow-sm theme-card relative pr-8">
               
-              {/* BOUTON SUPPRIMER L'ÉLÈVE */}
               <button 
                 onClick={() => handleRemoveStudent(u.id, u.displayName, b)}
                 className="absolute top-2 right-2 text-gray-300 hover:text-red-500 transition-colors p-1"
@@ -1106,6 +1094,7 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
                         ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                         : 'bg-orange-100 text-orange-700 hover:bg-orange-200 cursor-pointer'
                     } ${b.paymentMethod === 'CREDIT' ? 'opacity-75 cursor-not-allowed' : ''}`}
+                    title={b.paymentMethod === 'CREDIT' ? "Paiement par crédit non modifiable" : "Cliquez pour changer l'état"}
                   >
                     {b.paymentStatus === 'PAID' ? '✅ Payé' : '⏳ À régler'}
                   </button>
