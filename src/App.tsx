@@ -850,6 +850,51 @@ const AdminClassAttendees = ({ classInfo, onRefresh }: any) => {
           return; 
         }
 
+
+        const handleRemoveStudent = async (studentId: string, studentName: string, booking: any) => {
+          if (!window.confirm(`Es-tu sûre de vouloir retirer ${studentName} de ce cours ?`)) return;
+          
+          try {
+            await runTransaction(db, async (t) => {
+              const classRef = doc(db, DB_PREFIX + "classes", classInfo.id);
+              const userRef = doc(db, "users", studentId);
+              const classDoc = await t.get(classRef);
+              const userDoc = await t.get(userRef);
+              
+              if (!classDoc.exists() || !userDoc.exists()) throw "Document introuvable";
+              
+              const classData = classDoc.data();
+              const userData = userDoc.data();
+      
+              // Remboursement du crédit si payé par crédit
+              if (booking && booking.paymentMethod === 'CREDIT' && userData.creditPacks) {
+                  const updatedPacks = userData.creditPacks.map((p:any) => ({...p}));
+                  const packToRefund = updatedPacks.find((p:any) => p.remaining < p.qty) || updatedPacks[0];
+                  if (packToRefund) packToRefund.remaining += 1;
+                  t.update(userRef, { creditPacks: updatedPacks });
+              }
+      
+              // Mise à jour du cours (-1 place)
+              t.update(classRef, {
+                  attendeesCount: Math.max(0, (classData.attendeesCount || 1) - 1),
+                  attendeeIds: (classData.attendeeIds || []).filter((id: string) => id !== studentId)
+              });
+      
+              // Suppression de la facture/réservation
+              if (booking) {
+                  t.delete(doc(db, DB_PREFIX + "bookings", booking.id));
+              }
+            });
+            
+            // Notification silencieuse
+            sendNotification(`Admin a retiré ${studentName} du cours ${classInfo.title}`, 'CANCEL');
+            
+            if (onRefresh) onRefresh();
+            alert("Élève retiré avec succès !");
+          } catch (e) {
+            alert("Erreur lors de la suppression : " + e);
+          }
+        };
         // Créer le profil fantôme dans la base de données
         const newUserRef = await addDoc(collection(db, "users"), {
           displayName: targetUserName,
@@ -1027,20 +1072,31 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
         attendees.map(u => {
           const b = classBookings.find(x => x.userId === u.id);
           return (
-              <div key={u.id} className="flex flex-col gap-1.5 bg-white p-2.5 border border-gray-100 rounded shadow-sm theme-card">
-              <span className="font-bold text-gray-700 text-xs sm:text-sm truncate w-full">{u.displayName}</span>
+            <div key={u.id} className="flex flex-col gap-1.5 bg-white p-2.5 border border-gray-100 rounded shadow-sm theme-card relative pr-8">
+              
+              {/* BOUTON SUPPRIMER L'ÉLÈVE */}
+              <button 
+                onClick={() => handleRemoveStudent(u.id, u.displayName, b)}
+                className="absolute top-2 right-2 text-gray-300 hover:text-red-500 transition-colors p-1"
+                title="Retirer l'élève du cours"
+              >
+                <Trash2 size={16} />
+              </button>
+
+              <span className="font-bold text-gray-700 text-xs sm:text-sm truncate w-full pr-4">{u.displayName}</span>
+              
               {b ? (
                 <div className="flex justify-between items-stretch gap-1.5 w-full">
                   <select 
-  value={b.paymentMethod}
-  onChange={(e) => handlePaymentMethodChange(b, e.target.value)}
-  disabled={b.paymentMethod === 'CREDIT'}
-  className={`flex-1 min-w-0 text-[10px] font-bold text-gray-600 uppercase border border-gray-200 rounded p-1.5 outline-none bg-white truncate ${b.paymentMethod === 'CREDIT' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-amber-400'}`}
->
-  <option value="CASH">Espèces</option>
-  <option value="WERO_RIB">Wero/Virement</option>
-  <option value="CREDIT">Crédits</option>
-</select>
+                    value={b.paymentMethod}
+                    onChange={(e) => handlePaymentMethodChange(b, e.target.value)}
+                    disabled={b.paymentMethod === 'CREDIT'}
+                    className={`flex-1 min-w-0 text-[10px] font-bold text-gray-600 uppercase border border-gray-200 rounded p-1.5 outline-none bg-white truncate ${b.paymentMethod === 'CREDIT' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-amber-400'}`}
+                  >
+                    <option value="CASH">Espèces</option>
+                    <option value="WERO_RIB">Wero/Virement</option>
+                    <option value="CREDIT">Crédits</option>
+                  </select>
 
                   <button 
                     onClick={() => togglePayment(b.id, b.paymentStatus, b)}
@@ -1050,7 +1106,6 @@ const handlePaymentMethodChange = async (b: any, newMethod: string) => {
                         ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                         : 'bg-orange-100 text-orange-700 hover:bg-orange-200 cursor-pointer'
                     } ${b.paymentMethod === 'CREDIT' ? 'opacity-75 cursor-not-allowed' : ''}`}
-                    title={b.paymentMethod === 'CREDIT' ? "Paiement par crédit non modifiable" : "Cliquez pour changer l'état"}
                   >
                     {b.paymentStatus === 'PAID' ? '✅ Payé' : '⏳ À régler'}
                   </button>
@@ -2141,20 +2196,29 @@ export default function App() {
     }); return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (isAdmin) {
-       if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-       let isInitialLoad = true;
-       const notifUnsub = onSnapshot(query(collection(db, "notifications"), orderBy("date", "desc"), limit(20)), (nsnap) => {
-          setNotifications(nsnap.docs.map(d => ({id: d.id, ...d.data()} as AppNotification)));
-          if (!isInitialLoad && "Notification" in window && Notification.permission === "granted") { nsnap.docChanges().forEach((change) => { if (change.type === "added") { const data = change.doc.data(); if (Date.now() - new Date(data.date).getTime() < 120000) new Notification("Vertic'Ali", { body: data.text, icon: "/logo.png" }); } }); }
-          isInitialLoad = false;
-       });
-       const unsubP = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
-       const unsubB = onSnapshot(query(collection(db, DB_PREFIX + "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
-       return () => { notifUnsub(); unsubP(); unsubB(); };
-    }
-  }, [isAdmin]);
+// --- REMPLACE TES USEEFFECT ADMIN PAR CEUX-CI ---
+useEffect(() => {
+  if (isAdmin) {
+     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+     let isInitialLoad = true;
+     
+     // 1. Chargement des notifications
+     const notifUnsub = onSnapshot(query(collection(db, "notifications"), orderBy("date", "desc"), limit(20)), (nsnap) => {
+        setNotifications(nsnap.docs.map(d => ({id: d.id, ...d.data()} as AppNotification)));
+        if (!isInitialLoad && "Notification" in window && Notification.permission === "granted") { nsnap.docChanges().forEach((change) => { if (change.type === "added") { const data = change.doc.data(); if (Date.now() - new Date(data.date).getTime() < 120000) new Notification("Vertic'Ali", { body: data.text, icon: "/logo.png" }); } }); }
+        isInitialLoad = false;
+     });
+     
+     // 2. Chargement des achats et réservations
+     const unsubP = onSnapshot(query(collection(db, DB_PREFIX + "credit_purchases")), snap => setAllPurchases(snap.docs.map(d => ({id: d.id, ...d.data()} as CreditPurchase))));
+     const unsubB = onSnapshot(query(collection(db, DB_PREFIX + "bookings")), snap => setAllBookings(snap.docs.map(d => ({id: d.id, ...d.data()} as BookingInfo))));
+     
+     // 3. CORRECTION : Chargement des élèves (devUsers) intégré ici pour garantir la synchro
+     const unsubUsers = onSnapshot(query(collection(db, "users")), (snap) => setDevUsers(snap.docs.map(d => ({id: d.id, ...d.data()} as UserProfile))));
+
+     return () => { notifUnsub(); unsubP(); unsubB(); unsubUsers(); };
+  }
+}, [isAdmin]); // La dépendance est maintenant uniquement isAdmin (qui gère le vrai rôle ET le simulateur)
 
   const fetchAllData = async () => { const snap = await getDocs(query(collection(db, DB_PREFIX + "classes"), orderBy("startAt", "asc"))); const all = snap.docs.map(d => ({ id: d.id, ...d.data(), attendeeIds: d.data().attendeeIds || [], startAt: d.data().startAt?.toDate(), endAt: d.data().endAt?.toDate() } as DanceClass)); setClasses(all.filter(c => c.endAt && c.endAt > todayDate)); setPastClasses(all.filter(c => c.endAt && c.endAt <= todayDate).reverse()); };
   
@@ -2298,28 +2362,66 @@ useEffect(() => {
   };
 
   const handleCancel = async (classId: string) => {
-    if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; setProcessingId(classId);
+    if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; 
+    setProcessingId(classId);
+    
     try {
-      const q = query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); const snap = await getDocs(q); let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
-      if (!snap.empty) { bookingId = snap.docs[0].id; method = snap.docs[0].data().paymentMethod; pStatus = snap.docs[0].data().paymentStatus; }
+      const q = query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); 
+      const snap = await getDocs(q); 
+      let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
+      
+      if (!snap.empty) { 
+        bookingId = snap.docs[0].id; 
+        method = snap.docs[0].data().paymentMethod; 
+        pStatus = snap.docs[0].data().paymentStatus; 
+      }
+
       await runTransaction(db, async (t) => {
-        const classRef = doc(db, DB_PREFIX + "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
-        if (!classData || !userData) throw "Erreur DB"; if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { const updatedPacks = [...userData.creditPacks]; updatedPacks[0].remaining += 1; t.update(userRef, { creditPacks: updatedPacks }); }
-        t.update(classRef, { attendeesCount: classData.attendeesCount - 1, attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) }); if (bookingId) t.delete(doc(db, "bookings", bookingId));
+        const classRef = doc(db, DB_PREFIX + "classes", classId); 
+        const userRef = doc(db, "users", effectiveUser.id); 
+        const classDoc = await t.get(classRef); 
+        const userDoc = await t.get(userRef); 
+        const classData = classDoc.data(); 
+        const userData = userDoc.data() as UserProfile;
+        
+        if (!classData || !userData) throw "Erreur DB"; 
+        
+        // CORRECTION DU REMBOURSEMENT DE CRÉDIT
+        if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { 
+          // 1. Copie profonde (Deep Copy) pour forcer React à voir le changement
+          const updatedPacks = userData.creditPacks.map(p => ({...p})); 
+          // 2. On cherche le pack qui a été entamé (remaining < qty) pour lui rendre son crédit
+          const packToRefund = updatedPacks.find(p => p.remaining < p.qty) || updatedPacks[0];
+          if (packToRefund) {
+            packToRefund.remaining += 1; 
+          }
+          t.update(userRef, { creditPacks: updatedPacks }); 
+        }
+        
+        t.update(classRef, { 
+          attendeesCount: Math.max(0, classData.attendeesCount - 1), 
+          attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) 
+        }); 
+        
+        if (bookingId) t.delete(doc(db, DB_PREFIX + "bookings", bookingId));
       });
+
       const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
       if(cTarget) { 
         syncToSheet({ type: 'CANCEL', classId, studentId: effectiveUser.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${effectiveUser.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); 
         
-        // CORRECTION NOTIFICATION D'ANNULATION ICI
         const dateObj = cTarget.startAt;
         const dateFormatee = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
         const heureFormatee = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
         const emailMessage = `Annulation : ${effectiveUser.displayName} a annulé ${cTarget.title} ${dateFormatee} à ${heureFormatee} (${method})`;
         sendNotification(emailMessage, 'CANCEL'); 
       }
-      alert("Réservation annulée !"); fetchAllData();
-    } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
+      alert("Réservation annulée ! Ton crédit a été recrédité."); 
+      fetchAllData();
+    } catch (e) { 
+      alert("Erreur: " + e); 
+    } 
+    setProcessingId(null);
   };
 
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
