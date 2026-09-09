@@ -176,7 +176,10 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(236, 214, 120); doc.text(typeDoc, 150, 25); 
   doc.setTextColor(0, 0, 0); doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.text(`N° ${typeDoc.toLowerCase()}`, 150, 35); doc.setFont("helvetica", "normal"); doc.text(invNumber, 150, 40);
   doc.setFont("helvetica", "bold"); doc.text("Date", 150, 50); doc.setFont("helvetica", "normal"); doc.text(dateStr, 150, 55);
-  doc.setFont("helvetica", "bold"); doc.text("Facturé à :", 15, 60); doc.setFont("helvetica", "normal"); doc.text(clientName, 15, 65);
+  
+  // Remplacement de "Facturé à" par "Adressé à"
+  doc.setFont("helvetica", "bold"); doc.text("Adressé à :", 15, 60); doc.setFont("helvetica", "normal"); doc.text(clientName, 15, 65);
+  
   if (clientAddress) { const splitAddress = doc.splitTextToSize(clientAddress, 80); doc.text(splitAddress, 15, 70); } else { doc.text("Adresse non renseignée", 15, 70); }
   if (clientSiret) { doc.text(`N° SIRET : ${clientSiret}`, 15, 85); }
   doc.setFillColor(236, 214, 120); doc.rect(15, 95, 180, 8, 'F'); doc.setTextColor(0, 0, 0); doc.setFont("helvetica", "bold");
@@ -184,7 +187,7 @@ const renderInvoiceBase = async (doc: jsPDF, typeDoc: string, invNumber: string,
   doc.setTextColor(0, 0, 0); 
 };
 
-const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130, paymentInfo: string = "") => {
+const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130, paymentInfo: string = "", isDevis: boolean = false) => {
   doc.setDrawColor(200); doc.line(15, totalsY, 195, totalsY); 
   doc.setFont("helvetica", "bold"); doc.text("Total HT", 140, totalsY + 10); doc.text("TVA", 140, totalsY + 17); doc.text("Total TTC", 140, totalsY + 27);
   doc.setFont("helvetica", "normal"); doc.text(totalStr, 175, totalsY + 10); doc.text("0,00 €", 175, totalsY + 17); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0); doc.text(totalStr, 175, totalsY + 27);
@@ -195,10 +198,27 @@ const renderInvoiceFooter = (doc: jsPDF, totalStr: string, totalsY: number = 130
   }
 
   doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80);
-  const topLines = [ "TVA non applicable selon l'article 293B du code général des impôts.", "Pas d'escompte accordé pour paiement anticipé.", "En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.", "Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€." ];
+  
+  // Textes communs
+  const topLines = [ 
+    "TVA non applicable selon l'article 293B du code général des impôts.", 
+    "Pas d'escompte accordé pour paiement anticipé." 
+  ];
+  
+  // Textes exclusifs aux factures
+  if (!isDevis) {
+    topLines.push("En cas de non-paiement à la date d'échéance, des pénalités calculées à trois fois le taux d'intérêt légal seront appliquées.");
+    topLines.push("Tout retard de paiement entraînera une indemnité forfaitaire pour frais de recouvrement de 40€.");
+  }
+
   let y = 238; topLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 4; });
   y += 3; doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-  doc.text("RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL", 105, y, { align: "center" });
+  
+  // RIB exclusif aux factures
+  if (!isDevis) {
+    doc.text("RIB pour paiement par virement: FR2120041010052736887X02624 - BIC: PSSTFRPPLIL", 105, y, { align: "center" });
+  }
+  
   doc.setFillColor(236, 214, 120); doc.rect(0, 268, 210, 30, 'F'); doc.setTextColor(0, 0, 0);
   const greenLines = [ "Vertic'Ali - Alison BOUTELEUX - Entreprise individuelle", "18 rue Maurice Domon, Appt C22, 80000 AMIENS", "Tél: 06.21.05.64.14 - Mail: verticali.poledance@gmail.com", "SIRET: 94819885800029" ];
   y = 275; greenLines.forEach(line => { doc.text(line, 105, y, { align: "center" }); y += 5; });
@@ -318,10 +338,11 @@ const generateB2BInvoicePDF = async (invoice: B2BInvoice, client: ProClient) => 
   });
   const totalVal = `${invoice.total.toFixed(2).replace('.', ',')} €`;
   
-  // Date uniquement
   const paidDateOnly = invoiceDate.toLocaleDateString('fr-FR');
   const paymentInfo = invoice.status === 'FACTURE' ? getPaymentInfoStr(invoice.paymentStatus, invoice.paymentMethod, paidDateOnly) : '';
-  renderInvoiceFooter(doc, totalVal, Math.max(130, startY + 5), paymentInfo); 
+  
+  // C'EST ICI QUE LA MAGIE OPÈRE : On passe typeDoc === 'DEVIS' en 5ème paramètre
+  renderInvoiceFooter(doc, totalVal, Math.max(130, startY + 5), paymentInfo, typeDoc === 'DEVIS'); 
   
   const fileNameSuffix = invoice.invoiceType === 'B2C' ? `Groupe_${client.name.replace(/\s+/g, '_')}` : `PRO_${client.name.replace(/\s+/g, '_')}`;
   doc.save(`${typeDoc}_${fileNameSuffix}_${editionDateStr}.pdf`);
