@@ -3,7 +3,7 @@ import {
   Calendar, User, MapPin, Plus, Trash2, Zap, Loader2, Edit2, AlertTriangle, 
   Phone, HeartPulse, Wallet, Home, CheckCircle, Clock, History, Users, Archive, ChevronDown, ChevronUp,
   Smartphone, Building, ShoppingBag, XCircle, UserPlus, Settings, Map as MapIcon, FileText, Download, 
-  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, Type, Square, MessageSquare, Mail, EyeOff, Ghost, FlaskConical, Target, Lock
+  LayoutDashboard, TrendingUp, Briefcase, FileSignature, FileSpreadsheet, CalendarPlus, Bell, Search, Info, Database, Instagram, Code, MessageSquare, Mail, FlaskConical, Target, Lock
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
@@ -1528,107 +1528,6 @@ const ClassCard = ({ info, onDelete, onEditClick, onBookClick, onCancelClick, pr
   );
 };
 
-const AdminClassForm = ({ onAdd, locations, templates, editClassData, onCancelEdit, classLevels = [] }: any) => {
-  const [isOpen, setIsOpen] = useState(false); 
-  const [data, setData] = useState({title: '', date: '', desc: '', cap: 12, loc: '', price: '', externalLink: '', color: '#f59e0b', level: '', requiresDiscovery: false});
-  
-  useEffect(() => { 
-    if (editClassData) { 
-      setData({ 
-        title: editClassData.title || '', 
-        date: editClassData.startAt ? formatForInput(editClassData.startAt) : '', 
-        desc: editClassData.description || '', 
-        // 🛡️ SÉCURITÉ ICI : Si la capacité est vide/absente, on force à 12 au lieu de NaN
-        cap: editClassData.maxCapacity || 12, 
-        loc: editClassData.location || '', 
-        price: editClassData.price || '', 
-        externalLink: editClassData.externalLink || '', 
-        color: editClassData.color || '#f59e0b', 
-        level: editClassData.level || '', 
-        requiresDiscovery: editClassData.requiresDiscovery || false 
-      }); 
-      setIsOpen(true); 
-    } else { 
-      if(!data.loc && locations.length > 0) setData(prev => ({...prev, loc: locations[0].name})); 
-    } 
-  }, [editClassData, locations]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!data.date || !data.title) return;
-    const locObj = locations.find((l:any) => l.name === data.loc); 
-    
-    const payload = { 
-      title: data.title || '', 
-      description: data.desc || '', 
-      instructor: "Ali", 
-      location: data.loc || (locations.length > 0 ? locations[0].name : "Studio") || '', 
-      locationAddress: (locObj ? locObj.address : '') || '', 
-      price: String(data.price || ''), 
-      startAt: Timestamp.fromDate(new Date(data.date)), 
-      endAt: Timestamp.fromDate(new Date(new Date(data.date).getTime() + 90*60000)), 
-      maxCapacity: Number(data.cap) || 12, 
-      externalLink: data.externalLink || '', 
-      color: data.color || '#f59e0b', 
-      level: data.level || '', 
-      requiresDiscovery: data.requiresDiscovery || false 
-    };
-
-    if (editClassData) await updateDoc(doc(db, "classes", editClassData.id), payload); 
-    else await addDoc(collection(db, DB_PREFIX + "classes"), { ...payload, attendeesCount: 0, attendeeIds: [] });
-    
-    setIsOpen(false); onCancelEdit(); onAdd();
-  };
-
-  if (!isOpen && !editClassData) return <button onClick={() => setIsOpen(true)} className="w-full mb-8 border-2 border-dashed border-amber-300 text-amber-700 py-4 flex justify-center items-center gap-2 font-bold hover:bg-amber-50 theme-card"><Plus/> Créer un nouveau cours</button>;
-  
-  return (
-    <div className="bg-white p-6 mb-8 border border-amber-100 shadow-sm relative text-left theme-card">
-      <h3 className="font-bold text-amber-800 mb-4 text-lg">{editClassData ? 'Modifier le cours' : 'Nouveau Cours'}</h3>
-      {!editClassData && templates.length > 0 && <select className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 font-bold outline-none theme-btn" onChange={(e) => { const t = templates.find((x:any) => x.id === e.target.value); if (t) setData({...data, title: t.title, loc: t.locationName || '', cap: t.maxCapacity || 12, desc: t.description || '', price: t.price || '', externalLink: t.externalLink || '', color: t.color || '#f59e0b', level: t.level || '', requiresDiscovery: t.requiresDiscovery || false }); }}><option value="">-- Charger un modèle --</option>{templates.map((t:any) => <option key={t.id} value={t.id}>{t.title}</option>)}</select>}
-      
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <input value={data.title} onChange={e=>setData({...data, title: e.target.value})} className="w-full p-3 border theme-btn" placeholder="Titre du cours *"/>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <input type="datetime-local" value={data.date} onChange={e=>setData({...data, date: e.target.value})} className="w-full p-3 border theme-btn"/>
-          <select value={data.loc} onChange={e=>setData({...data, loc: e.target.value})} className="w-full p-3 border bg-white theme-btn">{locations.map((l:any) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
-          <input type="text" value={data.price} onChange={e=>setData({...data, price: e.target.value})} className="w-full p-3 border theme-btn" placeholder="Tarif"/>
-          {/* 🛡️ SÉCURITÉ ICI : Si data.cap n'est pas un nombre correct, on affiche une case vide pour éviter l'erreur visuelle */}
-          <input type="number" value={Number.isNaN(data.cap) ? '' : data.cap} onChange={e=>setData({...data, cap: parseInt(e.target.value) || 12})} className="w-full p-3 border theme-btn" placeholder="Places"/>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-gray-50 p-3 rounded-xl border">
-          <div>
-            <label className="text-xs font-bold text-gray-500 uppercase">Catégorie / Niveau</label>
-            <select value={data.level} onChange={e=>setData({...data, level: e.target.value})} className="w-full p-2 border mt-1 bg-white outline-none theme-btn">
-              <option value="">-- Sans catégorie --</option>
-              {classLevels.map((lvl:any) => <option key={lvl.id} value={lvl.id}>{lvl.label}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center">
-            <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-gray-100 w-full rounded-xl mt-4">
-              <input type="checkbox" checked={data.requiresDiscovery} onChange={e=>setData({...data, requiresDiscovery: e.target.checked})} className="w-5 h-5 accent-indigo-600"/>
-              <span className="text-sm font-bold text-gray-700">Restreint : Requiert la "Découverte"</span>
-            </label>
-          </div>
-        </div>
-
-        <textarea value={data.desc} onChange={e=>setData({...data, desc: e.target.value})} className="w-full p-3 border min-h-[100px] theme-btn" placeholder="Description"/>
-        <input value={data.externalLink} onChange={e=>setData({...data, externalLink: e.target.value})} className="w-full p-3 border border-green-200 bg-green-50 outline-none theme-btn" placeholder="Lien de réservation externe (Optionnel)"/>
-        
-        <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 theme-card">
-          <input type="color" value={data.color || '#f59e0b'} onChange={e=>setData({...data, color: e.target.value})} className="w-10 h-10 p-0 border-0 cursor-pointer bg-transparent"/>
-          <span className="text-sm font-bold text-gray-700">Couleur de la carte personnalisée</span>
-          {data.color && <button type="button" onClick={()=>setData({...data, color: '#f59e0b'})} className="text-xs text-red-500 font-bold ml-auto hover:underline">Réinitialiser couleur</button>}
-        </div>
-        
-        <div className="flex gap-3">
-          <button type="button" onClick={()=>{setIsOpen(false); onCancelEdit();}} className="flex-1 py-3 bg-gray-100 font-bold theme-btn">Annuler</button>
-          <button type="submit" className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold theme-btn">Valider</button>
-        </div>
-      </form>
-    </div>
-  );
-};
 
 const AdminPastTab = ({ pastClasses, onDelete, effectiveUser, fetchAllData, themeSettings, objectivesData }: any) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('');
@@ -2067,8 +1966,6 @@ export default function App() {
   const [simulatedRole, setSimulatedRole] = useState<string>('');
   const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
   const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
-  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string | null>(null);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -2081,10 +1978,9 @@ export default function App() {
   const [allPurchases, setAllPurchases] = useState<CreditPurchase[]>([]); const [allBookings, setAllBookings] = useState<BookingInfo[]>([]);
   const [myBookings, setMyBookings] = useState<BookingInfo[]>([]); const [myPurchases, setMyPurchases] = useState<CreditPurchase[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]); const [showNotifications, setShowNotifications] = useState(false);
-  const [processingId, setProcessingId] = useState<string | null>(null); const [showProfile, setShowProfile] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [paymentModal, setPaymentModal] = useState<{isOpen: boolean, classId: string | null}>({isOpen: false, classId: null});
   const [isBoutiqueOpen, setBoutiqueOpen] = useState(false); const [isPaymentInfoOpen, setPaymentInfoOpen] = useState(false); const [bookingSuccessData, setBookingSuccessData] = useState<DanceClass | null>(null);
-  const [editingClass, setEditingClass] = useState<DanceClass | null>(null);
   const [devUsers, setDevUsers] = useState<UserProfile[]>([]);
   const [objectivesData, setObjectivesData] = useState<any>({ bronze: [], silver: [], gold: [] });
   
@@ -2260,17 +2156,9 @@ useEffect(() => {
 
   const userTimeline = [ ...myBookings.map(b => ({ type: 'BOOKING', dateObj: new Date(b.date), data: b })), ...myPurchases.map(p => ({ type: 'PACK', dateObj: new Date(p.date), data: p })) ].sort((a,b) => b.dateObj.getTime() - a.dateObj.getTime());
   
-  const initiateBooking = (classId: string) => {
-    if (!authUser) {
-      alert("👋 Bienvenue ! Veuillez vous créer un compte pour réserver votre cours.");
-      setActiveTab('history'); 
-      return;
-    }
-    setPaymentModal({ isOpen: true, classId });
-  };
 
   const confirmBooking = async (method: PaymentMethod) => {
-    const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); setProcessingId(classId);
+    const classId = paymentModal.classId; if (!classId || !effectiveUser) return; setPaymentModal({ isOpen: false, classId: null }); 
     try {
       await runTransaction(db, async (t) => {
         const classRef = doc(db, DB_PREFIX + "classes", classId); const userRef = doc(db, "users", effectiveUser.id); const classDoc = await t.get(classRef); const userDoc = await t.get(userRef); const classData = classDoc.data(); const userData = userDoc.data() as UserProfile;
@@ -2301,70 +2189,7 @@ useEffect(() => {
         setBookingSuccessData(d.classTarget); 
         fetchAllData(); 
       });
-    } catch (e) { alert("Erreur: " + e); } setProcessingId(null);
-  };
-
-  const handleCancel = async (classId: string) => {
-    if (!effectiveUser || !window.confirm("Annuler ta réservation ?")) return; 
-    setProcessingId(classId);
-    
-    try {
-      const q = query(collection(db, DB_PREFIX + "bookings"), where("classId", "==", classId), where("userId", "==", effectiveUser.id)); 
-      const snap = await getDocs(q); 
-      let method = 'CASH'; let bookingId = null; let pStatus = 'PENDING';
-      
-      if (!snap.empty) { 
-        bookingId = snap.docs[0].id; 
-        method = snap.docs[0].data().paymentMethod; 
-        pStatus = snap.docs[0].data().paymentStatus; 
-      }
-
-      await runTransaction(db, async (t) => {
-        const classRef = doc(db, DB_PREFIX + "classes", classId); 
-        const userRef = doc(db, "users", effectiveUser.id); 
-        const classDoc = await t.get(classRef); 
-        const userDoc = await t.get(userRef); 
-        const classData = classDoc.data(); 
-        const userData = userDoc.data() as UserProfile;
-        
-        if (!classData || !userData) throw "Erreur DB"; 
-        
-        // CORRECTION DU REMBOURSEMENT DE CRÉDIT
-        if (method === 'CREDIT' && userData.creditPacks && userData.creditPacks.length > 0) { 
-          // 1. Copie profonde (Deep Copy) pour forcer React à voir le changement
-          const updatedPacks = userData.creditPacks.map(p => ({...p})); 
-          // 2. On cherche le pack qui a été entamé (remaining < qty) pour lui rendre son crédit
-          const packToRefund = updatedPacks.find(p => p.remaining < p.qty) || updatedPacks[0];
-          if (packToRefund) {
-            packToRefund.remaining += 1; 
-          }
-          t.update(userRef, { creditPacks: updatedPacks }); 
-        }
-        
-        t.update(classRef, { 
-          attendeesCount: Math.max(0, classData.attendeesCount - 1), 
-          attendeeIds: (classData.attendeeIds||[]).filter((id: string) => id !== effectiveUser.id) 
-        }); 
-        
-        if (bookingId) t.delete(doc(db, DB_PREFIX + "bookings", bookingId));
-      });
-
-      const cTarget = classes.find(c => c.id === classId) || pastClasses.find(c => c.id === classId);
-      if(cTarget) { 
-        syncToSheet({ type: 'CANCEL', classId, studentId: effectiveUser.id, classTitle: cTarget.title, date: cTarget.startAt.toLocaleDateString('fr-FR'), time: cTarget.startAt.toLocaleTimeString('fr-FR'), location: cTarget.location, studentName: `${effectiveUser.displayName} (${method})`, price: cTarget.price || '', paymentStatus: pStatus }); 
-        
-        const dateObj = cTarget.startAt;
-        const dateFormatee = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-        const heureFormatee = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
-        const emailMessage = `Annulation : ${effectiveUser.displayName} a annulé ${cTarget.title} ${dateFormatee} à ${heureFormatee} (${method})`;
-        sendNotification(emailMessage, 'CANCEL'); 
-      }
-      alert("Réservation annulée ! Ton crédit a été recrédité."); 
-      fetchAllData();
-    } catch (e) { 
-      alert("Erreur: " + e); 
-    } 
-    setProcessingId(null);
+    } catch (e) { alert("Erreur: " + e); } 
   };
 
   const markNotifRead = async (id: string) => { await updateDoc(doc(db, "notifications", id), { read: true }); };
@@ -2581,8 +2406,6 @@ useEffect(() => {
             todayDate={todayDate} // ⬅️ On ajoute cette ligne
           />
         )}
-        {activeTab === 'dev_admin' && isRealDevAdmin && <DevAdminTab themeSettings={themeSettings} users={devUsers} devVis={devVis} setDevVis={setDevVis} simRole={simulatedRole} setSimRole={setSimulatedRole} simDate={simulatedDate} setSimDate={setSimulatedDate} />}
-
         {/* --- PIED DE PAGE LÉGAL (FOOTER) --- */}
         <footer className="w-full max-w-[1500px] mx-auto mt-16 pt-8 pb-4 border-t border-gray-200 flex flex-col items-center gap-4">
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm font-bold text-gray-500">
