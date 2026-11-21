@@ -2735,8 +2735,7 @@ useEffect(() => {
         {activeTab === 'admin_today' && isAdmin && <AdminTodayTab classes={[...classes, ...pastClasses]} users={devUsers} today={todayDate} bookings={allBookings} />}
         {activeTab === 'admin_dashboard' && isAdmin && <AdminDashboardTab reminderDays={globalSettings.reminderDays} today={todayDate} />}
         {activeTab === 'admin_invoices' && isAdmin && <AdminInvoicesTab today={todayDate} />}
-        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab users={devUsers} setImpersonatedUserId={setImpersonatedUserId} setActiveTab={setActiveTab} />}
-        {activeTab === 'admin_past' && isAdmin && (
+        {activeTab === 'admin_students' && isAdmin && <AdminStudentsTab users={devUsers} setImpersonatedUserId={setImpersonatedUserId} />}        {activeTab === 'admin_past' && isAdmin && (
           <AdminPastTab 
             pastClasses={pastClasses} 
             onDelete={async(id: string) => { await deleteDoc(doc(db,"classes",id)); fetchAllData(); }} 
@@ -2746,7 +2745,7 @@ useEffect(() => {
             objectivesData={objectivesData} 
           />
         )}
-        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData} classLevels={classLevels} setClassLevels={setClassLevels}/>}
+        {activeTab === 'admin_settings' && isAdmin && <AdminSettingsTab locations={locations} templates={templates} globalSettings={globalSettings} creditPacks={creditPacks} objectivesData={objectivesData} setObjectivesData={setObjectivesData} classLevels={classLevels} />}
         {activeTab === 'objectives' && <StudentObjectivesTab userProfile={effectiveUser} objectivesData={objectivesData} />}
         {activeTab === 'admin_objectives' && isAdmin && (
           <AdminObjectivesTab 
