@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { db, auth } from './lib/firebase'; 
 import { 
-  collection, getDocs, addDoc, Timestamp, deleteDoc, doc, runTransaction, onSnapshot, setDoc, updateDoc, query, orderBy, where, limit 
+  collection, getDocs, addDoc, deleteDoc, doc, runTransaction, onSnapshot, setDoc, updateDoc, query, orderBy, where, limit 
 } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, updateProfile } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -152,7 +152,6 @@ const sendNotification = async (text: string, type: 'BOOKING' | 'CANCEL' | 'BOUT
   } catch (e) {}
 };
 
-const formatForInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const generateGoogleCalendarLink = (title: string, start: Date, end: Date, location: string, desc: string) => {
   const formatDT = (date: Date) => date.toISOString().replace(/-|:|\.\d+/g, '');
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${formatDT(start)}/${formatDT(end)}&details=${encodeURIComponent(desc)}&location=${encodeURIComponent(location)}`;
@@ -1965,8 +1964,7 @@ export default function App() {
   const [simulatedDate, setSimulatedDate] = useState<string>('');
   const [simulatedRole, setSimulatedRole] = useState<string>('');
   const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
-  const [devVis, setDevVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
-
+  const [devVis] = useState({ hideHeader: false, hideIcons: false, hideTabs: false });
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null); const [authUser, setAuthUser] = useState<FirebaseUser | null>(null); const [authLoading, setAuthLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'accueil' | 'history' | 'objectives' | 'admin_dashboard' | 'admin_invoices' | 'admin_students' | 'admin_objectives' | 'admin_past' | 'admin_settings' | 'dev_admin' | 'admin_today' | 'mentions' | 'cgv' | 'confidentialite'>('accueil');
